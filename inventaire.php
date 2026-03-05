@@ -6,8 +6,6 @@ require_once 'config/db.php';
 $message = '';
 $action = $_GET['action'] ?? 'resume';
 $lieu_id = isset($_GET['lieu_id']) ? (int) $_GET['lieu_id'] : 0;
-
-// VÉRIFICATION DES DROITS D'ÉDITION
 $peut_editer = ($_SESSION['can_edit'] === 1);
 
 // ==========================================
@@ -27,7 +25,6 @@ $inventaire_actif = $stmt_actif->fetch();
 // 2. TRAITEMENT DES ACTIONS
 // ==========================================
 
-// A. EXPORT EXCEL (.xls stylisé) DU STOCK ACTUEL (Autorisé à tous)
 if ($action === 'export_xls') {
     header("Content-Type: application/vnd.ms-excel; charset=utf-8");
     header("Content-Disposition: attachment; filename=Inventaire_Complet_" . date('Y-m-d') . ".xls");
@@ -50,14 +47,12 @@ if ($action === 'export_xls') {
     exit;
 }
 
-// B. LANCER LE MODE INVENTAIRE (Sécurisé)
 if ($action === 'lancer' && !$inventaire_actif && $peut_editer) {
     $pdo->exec("INSERT INTO inventaires (date_debut) VALUES (datetime('now', 'localtime'))");
     header("Location: inventaire.php");
     exit;
 }
 
-// C. CLÔTURER L'INVENTAIRE GLOBAL (Sécurisé)
 if ($action === 'cloturer' && $inventaire_actif && $peut_editer) {
     $stmt = $pdo->prepare("UPDATE inventaires SET statut = 'termine', date_fin = datetime('now', 'localtime') WHERE id = ?");
     $stmt->execute([$inventaire_actif['id']]);
@@ -65,37 +60,28 @@ if ($action === 'cloturer' && $inventaire_actif && $peut_editer) {
     exit;
 }
 
-// D. VALIDER LE COMPTAGE D'UN LIEU (Sécurisé)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_lieu']) && $inventaire_actif) {
-    if (!$peut_editer) {
+    if (!$peut_editer)
         die("🛑 Action bloquée : Vous n'avez pas les droits de modification.");
-    }
-
     $inv_id = $inventaire_actif['id'];
     if (isset($_POST['comptage']) && is_array($_POST['comptage'])) {
         foreach ($_POST['comptage'] as $stock_id => $qte_saisie) {
             if ($qte_saisie === '')
                 continue;
-
             $qte = (int) $qte_saisie;
             $stock_id = (int) $stock_id;
-
             $stmt = $pdo->prepare("SELECT quantite, materiel_id FROM stocks WHERE id = ?");
             $stmt->execute([$stock_id]);
             $current = $stmt->fetch();
-
             if ($current && $current['quantite'] != $qte) {
                 $stmt_hist = $pdo->prepare("INSERT INTO historique_comptages (inventaire_id, lieu_id, materiel_id, qte_avant, qte_apres) VALUES (?, ?, ?, ?, ?)");
                 $stmt_hist->execute([$inv_id, $lieu_id, $current['materiel_id'], $current['quantite'], $qte]);
-
-                if ($qte === 0) {
+                if ($qte === 0)
                     $pdo->prepare("DELETE FROM stocks WHERE id = ?")->execute([$stock_id]);
-                } else {
+                else
                     $pdo->prepare("UPDATE stocks SET quantite = ? WHERE id = ?")->execute([$qte, $stock_id]);
-                }
             }
         }
-
         $pdo->prepare("INSERT OR IGNORE INTO inventaires_lieux (inventaire_id, lieu_id) VALUES (?, ?)")->execute([$inv_id, $lieu_id]);
         header("Location: inventaire.php?msg=lieu_valide");
         exit;
@@ -168,7 +154,7 @@ if ($action === 'rapport') {
                 padding: 0 !important;
             }
 
-            .print-box {
+            .white-box {
                 box-shadow: none !important;
                 border: none !important;
                 padding: 0 !important;
@@ -204,8 +190,7 @@ if ($action === 'rapport') {
             }
         }
     </style>
-    <div class="print-box"
-        style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+    <div class="white-box">
         <div class="print-header"><img src="assets/img/favicon.png" alt="Logo Secourut's">MATOS MANAGER</div>
         <div
             style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f0f0f0; padding-bottom: 15px; margin-bottom: 20px;">
@@ -231,15 +216,14 @@ if ($action === 'rapport') {
                 style="background: #e8f5e9; color: #2e7d32; padding: 15px; border-radius: 4px; text-align: center; font-size: 16px; border: 1px solid #c8e6c9;">
                 Aucune erreur d'inventaire n'a été constatée.</div>
         <?php else: ?>
-            <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+            <table class="table-manager" style="margin-bottom: 30px; border: 1px solid #ddd;">
                 <thead>
-                    <tr
-                        style="background-color: #f8f9fa; text-transform: uppercase; font-size: 12px; color: #666; text-align: left;">
-                        <th style="padding: 8px; border: 1px solid #ddd;">Lieu</th>
-                        <th style="padding: 8px; border: 1px solid #ddd;">Matériel</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Avant</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Après</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Écart</th>
+                    <tr>
+                        <th>Lieu</th>
+                        <th>Matériel</th>
+                        <th style="text-align: center;">Avant</th>
+                        <th style="text-align: center;">Après</th>
+                        <th style="text-align: center;">Écart</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -248,16 +232,14 @@ if ($action === 'rapport') {
                         $couleur_ecart = $ecart > 0 ? '#2e7d32' : '#c62828';
                         $signe = $ecart > 0 ? '+' : ''; ?>
                         <tr>
-                            <td style="padding: 8px; border: 1px solid #eee; font-weight: bold;">
+                            <td style="font-weight: bold; border-right: 1px solid #eee;">
                                 <?php echo $d['lieu_icone'] . ' ' . htmlspecialchars($d['lieu_nom']); ?></td>
-                            <td style="padding: 8px; border: 1px solid #eee;"><?php echo htmlspecialchars($d['materiel_nom']); ?>
-                            </td>
-                            <td style="padding: 8px; border: 1px solid #eee; text-align: center; color: #999;">
+                            <td style="border-right: 1px solid #eee;"><?php echo htmlspecialchars($d['materiel_nom']); ?></td>
+                            <td style="text-align: center; color: #999; border-right: 1px solid #eee;">
                                 <?php echo $d['qte_avant']; ?></td>
-                            <td style="padding: 8px; border: 1px solid #eee; text-align: center; font-weight: bold;">
+                            <td style="text-align: center; font-weight: bold; border-right: 1px solid #eee;">
                                 <?php echo $d['qte_apres']; ?></td>
-                            <td
-                                style="padding: 8px; border: 1px solid #eee; text-align: center; font-weight: bold; color: <?php echo $couleur_ecart; ?>;">
+                            <td style="text-align: center; font-weight: bold; color: <?php echo $couleur_ecart; ?>;">
                                 <?php echo $signe . $ecart; ?></td>
                         </tr>
                     <?php endforeach; ?>
@@ -274,31 +256,27 @@ if ($action === 'rapport') {
                     <h4
                         style="background-color: #e0e0e0; color: #333; padding: 8px 15px; border-radius: 4px 4px 0 0; margin: 0; font-size: 15px; border: 1px solid #ccc; border-bottom: none;">
                         <?php echo htmlspecialchars($articles[0]['lieu_icone'] . ' ' . $lieu_nom); ?></h4>
-                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
+                    <table class="table-manager" style="border: 1px solid #ccc; margin-bottom: 10px;">
                         <thead>
-                            <tr
-                                style="background-color: #f8f9fa; text-transform: uppercase; font-size: 11px; color: #666; text-align: left;">
-                                <th style="padding: 6px 10px; border: 1px solid #ccc; width: 25%;">Catégorie</th>
-                                <th style="padding: 6px 10px; border: 1px solid #ccc; width: 45%;">Matériel</th>
-                                <th style="padding: 6px 10px; border: 1px solid #ccc; text-align: center; width: 15%;">Péremption
-                                </th>
-                                <th style="padding: 6px 10px; border: 1px solid #ccc; text-align: center; width: 15%;">Quantité</th>
+                            <tr>
+                                <th style="width: 25%; border-right: 1px solid #ccc;">Catégorie</th>
+                                <th style="width: 45%; border-right: 1px solid #ccc;">Matériel</th>
+                                <th style="text-align: center; width: 15%; border-right: 1px solid #ccc;">Péremption</th>
+                                <th style="text-align: center; width: 15%;">Quantité</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($articles as $art): ?>
                                 <tr>
-                                    <td style="padding: 6px 10px; border: 1px solid #eee; font-size: 13px;">
+                                    <td style="border-right: 1px solid #eee; font-size: 13px;">
                                         <?php echo htmlspecialchars($art['categorie_nom']); ?></td>
-                                    <td style="padding: 6px 10px; border: 1px solid #eee; font-size: 13px; font-weight: 500;">
+                                    <td style="border-right: 1px solid #eee; font-size: 13px; font-weight: 500;">
                                         <?php echo htmlspecialchars($art['materiel_nom']); ?></td>
-                                    <td
-                                        style="padding: 6px 10px; border: 1px solid #eee; text-align: center; font-size: 12px; color: #666;">
+                                    <td style="text-align: center; font-size: 12px; color: #666; border-right: 1px solid #eee;">
                                         <?php echo $art['date_peremption'] ? date('d/m/Y', strtotime($art['date_peremption'])) : '-'; ?>
                                     </td>
-                                    <td
-                                        style="padding: 6px 10px; border: 1px solid #eee; text-align: center; font-size: 14px; font-weight: bold;">
-                                        <?php echo $art['quantite']; ?></td>
+                                    <td style="text-align: center; font-size: 14px; font-weight: bold;"><?php echo $art['quantite']; ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -311,15 +289,13 @@ if ($action === 'rapport') {
 }
 
 // ==========================================
-// VUE 3 : INTERFACE DE COMPTAGE D'UN LIEU (Si inventaire actif)
+// VUE 3 : INTERFACE DE COMPTAGE D'UN LIEU
 // ==========================================
 elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
-    // SÉCURITÉ : On bloque l'accès à l'interface de comptage pour ceux qui n'ont pas les droits
     if (!$peut_editer) {
         header('Location: inventaire.php');
         exit;
     }
-
     $stmt_lieu = $pdo->prepare("SELECT * FROM lieux_stockage WHERE id = :id");
     $stmt_lieu->execute(['id' => $lieu_id]);
     $lieu = $stmt_lieu->fetch();
@@ -336,8 +312,8 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
         $stocks_par_categorie[$stock['categorie_nom']][] = $stock;
     }
     ?>
-    <div
-        style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 100; border-bottom: 3px solid #d32f2f; margin-bottom: 20px;">
+    <div class="white-box"
+        style="position: sticky; top: 0; z-index: 100; border-bottom: 3px solid #d32f2f; margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <div>
                 <a href="inventaire.php" style="color: #666; text-decoration: none; font-size: 14px;">⬅ Annuler et retourner
@@ -359,6 +335,7 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
             </div>
         </div>
     </div>
+
     <form id="form-inventaire" method="POST" action="inventaire.php?action=comptage&lieu_id=<?php echo $lieu_id; ?>">
         <input type="hidden" name="valider_lieu" value="1">
         <?php if (empty($stocks_par_categorie)): ?>
@@ -367,35 +344,30 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
             <?php foreach ($stocks_par_categorie as $categorie => $articles): ?>
                 <div style="margin-bottom: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
                     <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
-                    <h3
-                        style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>; padding: 12px 15px; border-radius: 4px 4px 0 0; margin: 0; font-size: 16px;">
+                    <h3 class="category-header"
+                        style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
                         <?php echo htmlspecialchars($categorie); ?></h3>
-                    <table style="width: 100%; border-collapse: collapse; background: white;">
+
+                    <table class="table-manager">
                         <thead>
-                            <tr style="background-color: #f8f9fa; text-transform: uppercase; font-size: 11px; color: #666;">
-                                <th style="padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; width: 40%;">
-                                    Matériel</th>
-                                <th style="padding: 12px 15px; text-align: center; border-bottom: 1px solid #ddd; width: 20%;">
-                                    Péremption</th>
-                                <th style="padding: 12px 15px; text-align: center; border-bottom: 1px solid #ddd; width: 20%;">
-                                    Théorique</th>
-                                <th style="padding: 12px 15px; text-align: center; border-bottom: 1px solid #ddd; width: 20%;">
-                                    Compté</th>
+                            <tr>
+                                <th style="width: 40%;">Matériel</th>
+                                <th style="text-align: center; width: 20%;">Péremption</th>
+                                <th style="text-align: center; width: 20%;">Théorique</th>
+                                <th style="text-align: center; width: 20%;">Compté</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($articles as $art): ?>
-                                <tr class="item-row" data-etat="vide"
-                                    style="border-bottom: 1px solid #eee; transition: background-color 0.3s;">
-                                    <td style="padding: 12px 15px; font-weight: 500; color: #333;">
-                                        <?php echo htmlspecialchars($art['materiel_nom']); ?></td>
-                                    <td style="padding: 12px 15px; text-align: center; color: #666; font-size: 13px;">
+                                <tr class="item-row" data-etat="vide" style="transition: background-color 0.3s;">
+                                    <td style="font-weight: 500; color: #333;"><?php echo htmlspecialchars($art['materiel_nom']); ?>
+                                    </td>
+                                    <td style="text-align: center; color: #666; font-size: 13px;">
                                         <?php echo $art['date_peremption'] ? date('d/m/Y', strtotime($art['date_peremption'])) : '-'; ?>
                                     </td>
-                                    <td
-                                        style="padding: 12px 15px; text-align: center; font-size: 18px; font-weight: bold; color: #999;">
+                                    <td style="text-align: center; font-size: 18px; font-weight: bold; color: #999;">
                                         <?php echo $art['quantite']; ?></td>
-                                    <td style="padding: 12px 15px; text-align: center;"><input type="number" min="0"
+                                    <td style="text-align: center;"><input type="number" min="0"
                                             name="comptage[<?php echo $art['stock_id']; ?>]" class="input-comptage"
                                             data-attendu="<?php echo $art['quantite']; ?>" oninput="verifierLigne(this)" placeholder="?"
                                             style="width: 80px; padding: 10px; font-size: 18px; text-align: center; border: 2px solid #ccc; border-radius: 6px; font-weight: bold; outline: none;">
@@ -412,6 +384,7 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                 style="background-color: #2e7d32; color: white; border: none; padding: 15px 40px; font-size: 20px; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(46,125,50,0.3);">✅
                 Enregistrer ce sac</button></div>
     </form>
+
     <script>
         function verifierLigne(inputField) {
             const row = inputField.closest('.item-row');
@@ -530,10 +503,8 @@ elseif ($inventaire_actif) {
                         document.querySelectorAll('.lieu-container').forEach(container => {
                             const id = parseInt(container.getAttribute('data-id'));
                             const nom = container.getAttribute('data-nom');
-
                             if (lieuxFaits.includes(id)) {
                                 nombreFaitsActuel++;
-                                // Si ce lieu vient tout juste d'être validé par un collègue
                                 if (!container.innerHTML.includes('✅')) {
                                     container.innerHTML = `
                                     <div style="display: block; width: 200px; padding: 20px; background-color: #e8f5e9; border: 2px solid #4caf50; border-radius: 8px; color: #2e7d32; text-align: center; opacity: 0.7; box-sizing: border-box;">
@@ -545,17 +516,14 @@ elseif ($inventaire_actif) {
                                 }
                             }
                         });
-
                         document.getElementById('compteur-faits').innerText = nombreFaitsActuel;
-
-                        // Si le dernier sac a été fini par un collègue, on affiche la zone de clôture
                         if (nombreFaitsActuel >= totalLieux && totalLieux > 0) {
                             document.getElementById('zone-cloture').style.display = 'block';
                         }
                     }
                 })
                 .catch(error => console.error("Synchronisation...", error));
-        }, 3000); // 3000ms = rafraîchissement toutes les 3 secondes
+        }, 3000);
     </script>
     <?php
 }
@@ -579,32 +547,28 @@ else {
     }
     ?>
     <div style="display: flex; gap: 20px; margin-bottom: 25px;">
-        <div
-            style="flex: 1; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: center; border-bottom: 4px solid #3498db;">
+        <div class="white-box" style="flex: 1; text-align: center; border-bottom: 4px solid #3498db; margin-bottom: 0;">
             <div style="font-size: 14px; color: #666; text-transform: uppercase;">Dans le catalogue</div>
             <div style="font-size: 36px; font-weight: bold; color: #3498db; margin: 10px 0;"><?php echo $nb_catalog; ?>
             </div>
             <div style="font-size: 13px; color: #999;">Références distinctes</div>
         </div>
-        <div
-            style="flex: 1; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: center; border-bottom: 4px solid #9b59b6;">
+        <div class="white-box" style="flex: 1; text-align: center; border-bottom: 4px solid #9b59b6; margin-bottom: 0;">
             <div style="font-size: 14px; color: #666; text-transform: uppercase;">Total physique</div>
             <div style="font-size: 36px; font-weight: bold; color: #9b59b6; margin: 10px 0;"><?php echo $nb_objets_total; ?>
             </div>
             <div style="font-size: 13px; color: #999;">Objets en circulation</div>
         </div>
         <?php if ($dernier_inv): ?>
-            <a href="inventaire.php?action=rapport&id=<?php echo $dernier_inv['id']; ?>" class="carte-animee"
-                style="flex: 1; background: white; padding: 20px; border-radius: 8px; text-decoration: none; text-align: center; border-bottom: 4px solid #f1c40f; display: block;">
+            <a href="inventaire.php?action=rapport&id=<?php echo $dernier_inv['id']; ?>" class="carte-animee white-box"
+                style="flex: 1; text-decoration: none; text-align: center; border-bottom: 4px solid #f1c40f; display: block; margin-bottom: 0;">
                 <div style="font-size: 14px; color: #666; text-transform: uppercase;">Dernier pointage</div>
                 <div style="font-size: 24px; font-weight: bold; color: #f39c12; margin: 15px 0;"><?php echo $date_affichage; ?>
                 </div>
-                <div style="font-size: 13px; color: #f39c12; font-weight: bold;">👉 Voir le rapport et l'inventaire complet
-                </div>
+                <div style="font-size: 13px; color: #f39c12; font-weight: bold;">👉 Voir le rapport</div>
             </a>
         <?php else: ?>
-            <div
-                style="flex: 1; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: center; border-bottom: 4px solid #f1c40f;">
+            <div class="white-box" style="flex: 1; text-align: center; border-bottom: 4px solid #f1c40f; margin-bottom: 0;">
                 <div style="font-size: 14px; color: #666; text-transform: uppercase;">Dernier pointage</div>
                 <div style="font-size: 24px; font-weight: bold; color: #f39c12; margin: 15px 0;">Jamais réalisé</div>
                 <div style="font-size: 13px; color: #999;">Aucun historique</div>
@@ -619,25 +583,23 @@ else {
                 L'INVENTAIRE</a></div>
     <?php endif; ?>
 
-    <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+    <div class="white-box">
         <h2 style="margin: 0; color: #333; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">Répartition globale des
             stocks</h2>
         <?php if (empty($repartition_triee)): ?>
-            <p style="text-align: center; color: #999; font-style: italic;">Aucun matériel en stock pour le moment.</p>
+            <p style="text-align: center; color: #999; font-style: italic;">Aucun matériel en stock.</p>
         <?php else: ?>
             <?php foreach ($repartition_triee as $categorie => $materiels_liste): ?>
                 <div style="margin-bottom: 30px;">
                     <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
-                    <h3
-                        style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>; padding: 12px 15px; border-radius: 4px 4px 0 0; margin: 0; font-size: 16px;">
+                    <h3 class="category-header"
+                        style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
                         <?php echo htmlspecialchars($categorie); ?></h3>
-                    <table style="width: 100%; border-collapse: collapse; border: 1px solid #eee;">
+                    <table class="table-manager" style="border: 1px solid #eee;">
                         <thead>
-                            <tr style="background-color: #f8f9fa; font-size: 11px; color: #666; text-transform: uppercase;">
-                                <th style="padding: 12px 15px; text-align: left; width: 40%; border-bottom: 1px solid #ddd;">Nom du
-                                    matériel</th>
-                                <th style="padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd;">Répartition par
-                                    lieux (Sacs & Réserves)</th>
+                            <tr>
+                                <th style="width: 40%; border-bottom: 1px solid #ddd;">Nom du matériel</th>
+                                <th style="border-bottom: 1px solid #ddd;">Répartition par lieux (Sacs & Réserves)</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -647,12 +609,12 @@ else {
                                     $somme_totale_objet += $l['quantite'];
                                 } ?>
                                 <tr style="border-bottom: 1px solid #eee;">
-                                    <td style="padding: 12px 15px; font-weight: 500; color: #333; border-right: 1px solid #eee;">
+                                    <td style="font-weight: 500; color: #333; border-right: 1px solid #eee;">
                                         <?php echo htmlspecialchars($nom_mat); ?>
                                         <div style="font-size: 11px; color: #999; margin-top: 5px;">Total dispo :
                                             <strong><?php echo $somme_totale_objet; ?></strong></div>
                                     </td>
-                                    <td style="padding: 12px 15px; font-size: 14px; color: #555;">
+                                    <td style="font-size: 14px; color: #555;">
                                         <div style="display: flex; gap: 10px; flex-wrap: wrap;"><?php foreach ($lieux as $l): ?><span
                                                     style="background: #f4f7f6; padding: 5px 10px; border-radius: 4px; border: 1px solid #e0e0e0;"><strong><?php echo htmlspecialchars($l['lieu']); ?></strong>
                                                     : <?php echo $l['quantite']; ?></span><?php endforeach; ?></div>

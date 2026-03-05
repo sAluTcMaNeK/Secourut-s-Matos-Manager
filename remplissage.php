@@ -4,28 +4,23 @@ require_once 'includes/auth.php';
 require_once 'config/db.php';
 
 $lieu_id = isset($_GET['lieu_id']) ? (int) $_GET['lieu_id'] : 0;
-// VÉRIFICATION DES DROITS D'ÉDITION
 $peut_editer = ($_SESSION['can_edit'] === 1);
 
-// ==========================================
-// MODE 1 : AUCUN SAC SÉLECTIONNÉ (Écran de choix)
-// ==========================================
 if ($lieu_id === 0) {
     require_once 'includes/header.php';
     $lieux = $pdo->query("SELECT * FROM lieux_stockage ORDER BY type, nom")->fetchAll();
     ?>
-    <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+    <div class="white-box">
         <h2 style="margin-top: 0; color: #d32f2f; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">🔄 Mode
             Remplissage</h2>
         <p style="color: #666; margin-bottom: 20px;">Sélectionne le stockage que tu souhaites consulter ou modifier :</p>
         <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-            <?php foreach ($lieux as $lieu): ?>
-                <?php
+            <?php foreach ($lieux as $lieu):
                 $type_affichage = ($lieu['type'] === 'reserve') ? 'Réserve' : (($lieu['type'] === 'sac_inter') ? 'Sac Intervention' : 'Sac Logistique');
                 $icone = !empty($lieu['icone']) ? $lieu['icone'] : ($lieu['type'] === 'reserve' ? '🏢' : '🎒');
                 ?>
                 <a href="remplissage.php?lieu_id=<?php echo $lieu['id']; ?>" class="carte-animee"
-                    style="display: block; width: 200px; padding: 20px; background-color: white; border: 1px solid transparent; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-decoration: none; color: #333; text-align: center;">
+                    style="display: block; width: 200px; padding: 20px; background-color: white; border-radius: 8px; border: 1px solid transparent; text-decoration: none; color: #333; text-align: center;">
                     <div style="font-size: 40px; margin-bottom: 10px;"><?php echo htmlspecialchars($icone); ?></div>
                     <strong style="font-size: 16px; display: block;"><?php echo htmlspecialchars($lieu['nom']); ?></strong>
                     <span style="font-size: 12px; color: #999; text-transform: uppercase;"><?php echo $type_affichage; ?></span>
@@ -38,15 +33,15 @@ if ($lieu_id === 0) {
     exit;
 }
 
-// ==========================================
-// TRAITEMENT DES FORMULAIRES (SÉCURISÉ)
-// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!$peut_editer) {
+    if (!$peut_editer)
         die("🛑 Action bloquée : Vous n'avez pas les droits de modification.");
-    }
-
     $action = $_POST['action'] ?? '';
+
+    // --- PREPARATION DE L'HISTORIQUE : On récupère le nom du lieu ---
+    $stmt_nom_lieu = $pdo->prepare("SELECT nom FROM lieux_stockage WHERE id = ?");
+    $stmt_nom_lieu->execute([$lieu_id]);
+    $nom_du_lieu = $stmt_nom_lieu->fetchColumn() ?: "Lieu inconnu";
 
     try {
         if ($action === 'edit_stock') {
@@ -54,30 +49,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $qty = (int) $_POST['quantite'];
             $date_p = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
 
+            // Pour l'historique : on cherche le nom de l'objet qu'on est en train de modifier
+            $stmt_mat_nom = $pdo->prepare("SELECT m.nom FROM materiels m JOIN stocks s ON m.id = s.materiel_id WHERE s.id = ?");
+            $stmt_mat_nom->execute([$stock_id]);
+            $nom_mat_edit = $stmt_mat_nom->fetchColumn() ?: "Objet";
+
             if ($qty <= 0) {
                 $pdo->prepare("DELETE FROM stocks WHERE id = :id")->execute(['id' => $stock_id]);
+                $action_texte = "A retiré l'objet '" . $nom_mat_edit . "' du lieu : " . $nom_du_lieu;
             } else {
                 $pdo->prepare("UPDATE stocks SET quantite = :qty, date_peremption = :dp WHERE id = :id")->execute(['qty' => $qty, 'dp' => $date_p, 'id' => $stock_id]);
+                $action_texte = "A mis à jour la quantité de '" . $nom_mat_edit . "' (Lieu : " . $nom_du_lieu . ")";
             }
+
+            // --- ENREGISTREMENT HISTORIQUE ---
+            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+
         } elseif ($action === 'delete_stock') {
             $stock_id = (int) $_POST['stock_id'];
+
+            // Pour l'historique : on cherche le nom avant de le supprimer
+            $stmt_mat_nom = $pdo->prepare("SELECT m.nom FROM materiels m JOIN stocks s ON m.id = s.materiel_id WHERE s.id = ?");
+            $stmt_mat_nom->execute([$stock_id]);
+            $nom_mat_del = $stmt_mat_nom->fetchColumn() ?: "Objet";
+
             $pdo->prepare("DELETE FROM stocks WHERE id = :id")->execute(['id' => $stock_id]);
+
+            // --- ENREGISTREMENT HISTORIQUE ---
+            $action_texte = "A supprimé définitivement '" . $nom_mat_del . "' (Lieu : " . $nom_du_lieu . ")";
+            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+
         } elseif ($action === 'add_stock') {
             $materiel_id = (int) $_POST['materiel_id'];
             $quantite = (int) $_POST['quantite'];
             $date_peremption = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
-
             if ($materiel_id && $quantite > 0) {
                 $stmt_check = $pdo->prepare("SELECT id, quantite FROM stocks WHERE materiel_id = :mat AND lieu_id = :lieu AND IFNULL(date_peremption, '') = IFNULL(:peremp, '')");
                 $stmt_check->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'peremp' => $date_peremption]);
                 $stock_existant = $stmt_check->fetch();
-
                 if ($stock_existant) {
-                    $nouvelle_quantite = $stock_existant['quantite'] + $quantite;
-                    $pdo->prepare("UPDATE stocks SET quantite = :qty WHERE id = :id")->execute(['qty' => $nouvelle_quantite, 'id' => $stock_existant['id']]);
+                    $pdo->prepare("UPDATE stocks SET quantite = :qty WHERE id = :id")->execute(['qty' => $stock_existant['quantite'] + $quantite, 'id' => $stock_existant['id']]);
                 } else {
                     $pdo->prepare("INSERT INTO stocks (materiel_id, lieu_id, quantite, date_peremption) VALUES (:mat, :lieu, :qty, :peremp)")->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'qty' => $quantite, 'peremp' => $date_peremption]);
                 }
+
+                // --- ENREGISTREMENT HISTORIQUE ---
+                $stmt_nom = $pdo->prepare("SELECT nom FROM materiels WHERE id = ?");
+                $stmt_nom->execute([$materiel_id]);
+                $nom_mat = $stmt_nom->fetchColumn() ?: "Objet inconnu";
+
+                $action_texte = "A ajouté $quantite x $nom_mat dans : $nom_du_lieu";
+                $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
             }
         }
         header("Location: remplissage.php?lieu_id=" . $lieu_id);
@@ -87,7 +109,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// RÉCUPÉRATION DES DONNÉES
 $stmt_lieu = $pdo->prepare("SELECT * FROM lieux_stockage WHERE id = :id");
 $stmt_lieu->execute(['id' => $lieu_id]);
 $lieu = $stmt_lieu->fetch();
@@ -111,7 +132,7 @@ $icone_affichage = !empty($lieu['icone']) ? $lieu['icone'] : '📦';
 require_once 'includes/header.php';
 ?>
 
-<div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+<div class="white-box">
 
     <div
         style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f0f0f0; padding-bottom: 15px; margin-bottom: 20px;">
@@ -125,44 +146,43 @@ require_once 'includes/header.php';
     </div>
 
     <?php if ($peut_editer): ?>
-        <div
-            style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #2c3e50;">
+        <div class="form-container">
             <h3 style="margin-top: 0; font-size: 16px; color: #2c3e50;">➕ Ajouter un nouveau matériel</h3>
-            <form action="remplissage.php?lieu_id=<?php echo $lieu_id; ?>" method="POST"
-                style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+            <form action="remplissage.php?lieu_id=<?php echo $lieu_id; ?>" method="POST" class="form-group-inline">
                 <input type="hidden" name="action" value="add_stock">
-                <div style="flex: 2; min-width: 200px;"><label
-                        style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">Catalogue</label><select
-                        name="materiel_id" required
-                        style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-                        <option value="">-- Sélectionner --</option><?php foreach ($materiels as $mat): ?>
+                <div style="flex: 2; min-width: 200px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">Catalogue</label>
+                    <select name="materiel_id" required class="input-field">
+                        <option value="">-- Sélectionner --</option>
+                        <?php foreach ($materiels as $mat): ?>
                             <option value="<?php echo $mat['id']; ?>"><?php echo htmlspecialchars($mat['nom']); ?></option>
                         <?php endforeach; ?>
-                    </select></div>
-                <div style="flex: 1; min-width: 100px;"><label
-                        style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">Quantité</label><input
-                        type="number" name="quantite" required min="1" value="1"
-                        style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                    </select>
                 </div>
-                <div style="flex: 1; min-width: 150px;"><label
-                        style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">Péremption</label><input
-                        type="date" name="date_peremption"
-                        style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                <div style="flex: 1; min-width: 100px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">Quantité</label>
+                    <input type="number" name="quantite" required min="1" value="1" class="input-field">
                 </div>
-                <div><button type="submit"
-                        style="padding: 9px 20px; background-color: #d32f2f; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Insérer</button>
+                <div style="flex: 1; min-width: 150px;">
+                    <label
+                        style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">Péremption</label>
+                    <input type="date" name="date_peremption" class="input-field">
+                </div>
+                <div>
+                    <button type="submit"
+                        style="padding: 11px 20px; background-color: #d32f2f; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Insérer</button>
                 </div>
             </form>
         </div>
     <?php endif; ?>
 
-    <div
-        style="background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; border: 1px solid #e0e0e0;">
+    <div class="form-container"
+        style="background: #fff; border: 1px solid #e0e0e0; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
         <strong style="color: #333;">🔍 Filtrer l'inventaire :</strong>
         <input type="text" id="searchBar" onkeyup="filtrerInventaire()" placeholder="Rechercher un matériel..."
-            style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; flex: 1; min-width: 150px;">
-        <select id="catFilter" onchange="filtrerInventaire()"
-            style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; min-width: 150px;">
+            class="input-field" style="flex: 1; min-width: 150px;">
+        <select id="catFilter" onchange="filtrerInventaire()" class="input-field"
+            style="min-width: 150px; flex: initial;">
             <option value="">Toutes les catégories</option>
             <?php foreach (array_keys($stocks_par_categorie) as $cat_nom): ?>
                 <option value="<?php echo htmlspecialchars($cat_nom); ?>"><?php echo htmlspecialchars($cat_nom); ?></option>
@@ -180,29 +200,22 @@ require_once 'includes/header.php';
         <p style="text-align: center; color: #999; font-style: italic;">Le stockage est vide.</p>
     <?php else: ?>
         <?php foreach ($stocks_par_categorie as $categorie => $articles): ?>
-
             <div class="category-block" data-cat="<?php echo htmlspecialchars($categorie); ?>"
                 style="margin-bottom: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
                 <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
-                <h4
-                    style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>; padding: 12px 15px; border-radius: 4px 4px 0 0; margin: 0; font-size: 16px;">
+                <h4 class="category-header"
+                    style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
                     <?php echo htmlspecialchars($categorie); ?>
                 </h4>
 
-                <table style="width: 100%; border-collapse: collapse; background: white;">
+                <table class="table-manager">
                     <thead>
-                        <tr
-                            style="background-color: #f8f9fa; text-transform: uppercase; font-size: 11px; color: #666; letter-spacing: 0.5px;">
-                            <th
-                                style="padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; width: <?php echo $peut_editer ? '40%' : '60%'; ?>;">
-                                NOM DU MATÉRIEL</th>
-                            <th style="padding: 12px 15px; text-align: center; border-bottom: 1px solid #ddd; width: 25%;">
-                                PÉREMPTION</th>
-                            <th style="padding: 12px 15px; text-align: center; border-bottom: 1px solid #ddd; width: 15%;">
-                                QUANTITÉ</th>
+                        <tr>
+                            <th style="width: <?php echo $peut_editer ? '40%' : '60%'; ?>;">NOM DU MATÉRIEL</th>
+                            <th style="text-align: center; width: 25%;">PÉREMPTION</th>
+                            <th style="text-align: center; width: 15%;">QUANTITÉ</th>
                             <?php if ($peut_editer): ?>
-                                <th style="padding: 12px 15px; text-align: center; border-bottom: 1px solid #ddd; width: 20%;">
-                                    ACTIONS</th><?php endif; ?>
+                                <th style="text-align: center; width: 20%;">ACTIONS</th><?php endif; ?>
                         </tr>
                     </thead>
                     <tbody>
@@ -214,41 +227,40 @@ require_once 'includes/header.php';
                             <?php if ($peut_editer): ?>
                                 <form id="form-edit-<?php echo $sid; ?>" method="POST"
                                     action="remplissage.php?lieu_id=<?php echo $lieu_id; ?>">
-                                    <input type="hidden" name="action" value="edit_stock">
-                                    <input type="hidden" name="stock_id" value="<?php echo $sid; ?>">
+                                    <input type="hidden" name="action" value="edit_stock"><input type="hidden" name="stock_id"
+                                        value="<?php echo $sid; ?>">
                                 </form>
                             <?php endif; ?>
 
                             <tr class="item-row" data-nom="<?php echo htmlspecialchars(strtolower($article['materiel_nom'])); ?>"
-                                data-peremp="<?php echo $raw_date; ?>"
-                                style="border-bottom: 1px solid #eee; transition: background 0.2s;">
-                                <td style="padding: 12px 15px; font-weight: 500; color: #444;">
+                                data-peremp="<?php echo $raw_date; ?>" style="transition: background 0.2s;">
+                                <td style="font-weight: 500; color: #444;">
                                     <?php echo htmlspecialchars($article['materiel_nom']); ?>
                                 </td>
 
-                                <td style="padding: 12px 15px; text-align: center; color: #666;">
+                                <td style="text-align: center; color: #666;">
                                     <span class="view-mode-<?php echo $sid; ?>"><?php echo $affichage_date; ?></span>
-                                    <?php if ($peut_editer): ?><input class="edit-mode-<?php echo $sid; ?>" type="date"
+                                    <?php if ($peut_editer): ?><input class="edit-mode-<?php echo $sid; ?> input-field" type="date"
                                             form="form-edit-<?php echo $sid; ?>" name="date_peremption" value="<?php echo $raw_date; ?>"
-                                            style="display:none; width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 4px;"><?php endif; ?>
+                                            style="display:none; padding: 5px;"><?php endif; ?>
                                 </td>
 
-                                <td style="padding: 12px 15px; text-align: center; font-size: 16px;">
+                                <td style="text-align: center; font-size: 16px;">
                                     <span class="view-mode-<?php echo $sid; ?>"
                                         style="font-weight: bold;"><?php echo $article['quantite']; ?></span>
-                                    <?php if ($peut_editer): ?><input class="edit-mode-<?php echo $sid; ?>" type="number"
-                                            form="form-edit-<?php echo $sid; ?>" name="quantite"
+                                    <?php if ($peut_editer): ?><input class="edit-mode-<?php echo $sid; ?> input-field"
+                                            type="number" form="form-edit-<?php echo $sid; ?>" name="quantite"
                                             value="<?php echo $article['quantite']; ?>" min="0"
-                                            style="display:none; width: 60px; padding: 5px; text-align: center; border: 1px solid #ccc; border-radius: 4px; margin: 0 auto;"><?php endif; ?>
+                                            style="display:none; width: 60px; padding: 5px; text-align: center; margin: 0 auto;"><?php endif; ?>
                                 </td>
 
                                 <?php if ($peut_editer): ?>
-                                    <td style="padding: 12px 15px; text-align: center;">
+                                    <td style="text-align: center;">
                                         <div class="view-mode-<?php echo $sid; ?>"
                                             style="display: flex; justify-content: center; gap: 10px;">
                                             <button type="button" onclick="toggleEdit(<?php echo $sid; ?>, true)"
                                                 style="background: transparent; border: none; cursor: pointer; font-size: 16px;"
-                                                title="Modifier (Quantité/Date)">✏️</button>
+                                                title="Modifier">✏️</button>
                                             <form method="POST" style="margin: 0;"
                                                 onsubmit="return confirm('Retirer définitivement cet objet du sac ?');">
                                                 <input type="hidden" name="action" value="delete_stock">
@@ -261,11 +273,9 @@ require_once 'includes/header.php';
                                         <div class="edit-mode-<?php echo $sid; ?>"
                                             style="display: none; justify-content: center; gap: 10px;">
                                             <button type="submit" form="form-edit-<?php echo $sid; ?>"
-                                                style="background: #4caf50; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-weight: bold;"
-                                                title="Enregistrer">💾</button>
+                                                style="background: #4caf50; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">💾</button>
                                             <button type="button" onclick="toggleEdit(<?php echo $sid; ?>, false)"
-                                                style="background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-weight: bold;"
-                                                title="Annuler">❌</button>
+                                                style="background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">❌</button>
                                         </div>
                                     </td>
                                 <?php endif; ?>
@@ -280,25 +290,18 @@ require_once 'includes/header.php';
 
 <?php if ($peut_editer): ?>
     <script>
-        // Fonction pour basculer entre le mode lecture et le mode édition pour une ligne
         function toggleEdit(id, showEdit) {
-            const viewElements = document.querySelectorAll('.view-mode-' + id);
-            const editElements = document.querySelectorAll('.edit-mode-' + id);
-
-            viewElements.forEach(el => el.style.display = showEdit ? 'none' : '');
-            editElements.forEach(el => el.style.display = showEdit ? 'inline-block' : 'none');
+            document.querySelectorAll('.view-mode-' + id).forEach(el => el.style.display = showEdit ? 'none' : '');
+            document.querySelectorAll('.edit-mode-' + id).forEach(el => el.style.display = showEdit ? 'inline-block' : 'none');
         }
     </script>
 <?php endif; ?>
 
 <script>
-    // Fonction de filtrage en temps réel
     function filtrerInventaire() {
         const search = document.getElementById('searchBar').value.toLowerCase();
         const catFilter = document.getElementById('catFilter').value;
         const expFilter = document.getElementById('expFilter').checked;
-
-        // Calcul de la date limite (aujourd'hui + 30 jours)
         const limitDate = new Date();
         limitDate.setDate(limitDate.getDate() + 30);
 
@@ -311,25 +314,18 @@ require_once 'includes/header.php';
                 const peremp = row.getAttribute('data-peremp');
                 let show = true;
 
-                // Filtre Texte
                 if (search && !nom.includes(search)) show = false;
-                // Filtre Catégorie
                 if (catFilter && blockCat !== catFilter) show = false;
-                // Filtre Péremption
                 if (expFilter) {
-                    if (!peremp) {
-                        show = false; // Pas de date = pas périmé
-                    } else {
+                    if (!peremp) show = false;
+                    else {
                         const pDate = new Date(peremp);
-                        if (pDate > limitDate) show = false; // Expire dans longtemps
+                        if (pDate > limitDate) show = false;
                     }
                 }
-
                 row.style.display = show ? '' : 'none';
                 if (show) hasVisibleRow = true;
             });
-
-            // Masquer tout le bloc si aucun élément ne correspond
             block.style.display = hasVisibleRow ? '' : 'none';
         });
     }

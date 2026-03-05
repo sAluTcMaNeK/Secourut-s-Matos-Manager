@@ -4,7 +4,6 @@ require_once 'includes/auth.php';
 require_once 'config/db.php';
 
 $message = '';
-// VÉRIFICATION DES DROITS D'ÉDITION
 $peut_editer = ($_SESSION['can_edit'] === 1);
 
 try {
@@ -12,19 +11,16 @@ try {
 } catch (PDOException $e) {
 }
 
-// SÉCURITÉ : On bloque les actions POST si pas les droits
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$peut_editer) {
     $message = '<div style="background-color: #ffebee; color: #c62828; padding: 10px; border-radius: 4px; margin-bottom: 20px;">🛑 Action bloquée : Vous n\'avez pas les droits de modification.</div>';
 }
 
-// --- 1. TRAITEMENT DE LA SUPPRESSION D'UN STOCKAGE ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'supprimer_lieu' && $peut_editer) {
     $id_a_supprimer = (int) $_POST['lieu_id'];
     $confirmation = trim($_POST['confirmation_text']);
     if ($confirmation === 'CONFIRMER') {
         try {
-            $stmt = $pdo->prepare("DELETE FROM lieux_stockage WHERE id = :id");
-            $stmt->execute(['id' => $id_a_supprimer]);
+            $pdo->prepare("DELETE FROM lieux_stockage WHERE id = :id")->execute(['id' => $id_a_supprimer]);
             header("Location: lieux.php?msg=deleted");
             exit;
         } catch (PDOException $e) {
@@ -35,15 +31,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// --- 2. TRAITEMENT DE LA CRÉATION DE LIEU ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'creer_lieu' && $peut_editer) {
     $nom = trim($_POST['nom']);
     $type = $_POST['type'];
     $icone = $_POST['icone'];
     if (!empty($nom) && !empty($type)) {
         try {
-            $stmt = $pdo->prepare("INSERT INTO lieux_stockage (nom, type, icone) VALUES (:nom, :type, :icone)");
-            $stmt->execute(['nom' => $nom, 'type' => $type, 'icone' => $icone]);
+            $pdo->prepare("INSERT INTO lieux_stockage (nom, type, icone) VALUES (:nom, :type, :icone)")->execute(['nom' => $nom, 'type' => $type, 'icone' => $icone]);
             $message = '<div style="background-color: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 4px; margin-bottom: 20px;">✅ Le nouveau stockage a été créé !</div>';
         } catch (PDOException $e) {
             $message = '<div style="background-color: #ffebee; color: #c62828; padding: 10px; border-radius: 4px; margin-bottom: 20px;">❌ Erreur : Ce nom existe déjà.</div>';
@@ -51,18 +45,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// --- 3. TRAITEMENT DE LA MODIFICATION DE LIEU (NOUVEAU) ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'modifier_lieu' && $peut_editer) {
     $id = (int) $_POST['lieu_id'];
     $nom = trim($_POST['nom']);
     $type = $_POST['type'];
     $icone = $_POST['icone'];
-
     if ($id > 0 && !empty($nom) && !empty($type)) {
         try {
-            $stmt = $pdo->prepare("UPDATE lieux_stockage SET nom = :nom, type = :type, icone = :icone WHERE id = :id");
-            $stmt->execute(['nom' => $nom, 'type' => $type, 'icone' => $icone, 'id' => $id]);
-            $message = '<div style="background-color: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 4px; margin-bottom: 20px;">✅ Les paramètres du stockage ont été mis à jour !</div>';
+            $pdo->prepare("UPDATE lieux_stockage SET nom = :nom, type = :type, icone = :icone WHERE id = :id")->execute(['nom' => $nom, 'type' => $type, 'icone' => $icone, 'id' => $id]);
+            $message = '<div style="background-color: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 4px; margin-bottom: 20px;">✅ Paramètres mis à jour !</div>';
         } catch (PDOException $e) {
             $message = '<div style="background-color: #ffebee; color: #c62828; padding: 10px; border-radius: 4px; margin-bottom: 20px;">❌ Erreur lors de la modification.</div>';
         }
@@ -101,8 +92,7 @@ if ($lieu_id > 0) {
     $icone_affichage = !empty($lieu['icone']) ? $lieu['icone'] : ($lieu['type'] === 'reserve' ? '🏢' : '🎒');
     ?>
 
-    <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-
+    <div class="white-box">
         <?php echo $message; ?>
 
         <div
@@ -138,15 +128,13 @@ if ($lieu_id > 0) {
             <div id="zone-edition-lieu"
                 style="display: none; background-color: #f8f9fa; border: 1px solid #ccc; border-left: 5px solid #2c3e50; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
                 <h3 style="margin-top: 0; color: #2c3e50;">⚙️ Modifier les informations de ce stockage</h3>
-                <form action="lieux.php?id=<?php echo $lieu_id; ?>" method="POST"
-                    style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+                <form action="lieux.php?id=<?php echo $lieu_id; ?>" method="POST" class="form-group-inline">
                     <input type="hidden" name="action" value="modifier_lieu">
                     <input type="hidden" name="lieu_id" value="<?php echo $lieu_id; ?>">
 
                     <div style="flex: 1; min-width: 150px;">
                         <label style="display: block; font-weight: bold; font-size: 14px; margin-bottom: 5px;">Catégorie</label>
-                        <select name="type" required
-                            style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                        <select name="type" required class="input-field">
                             <option value="sac_inter" <?php if ($lieu['type'] === 'sac_inter')
                                 echo 'selected'; ?>>Sac
                                 d'intervention</option>
@@ -164,12 +152,12 @@ if ($lieu_id > 0) {
                     <div style="flex: 2; min-width: 200px;">
                         <label style="display: block; font-weight: bold; font-size: 14px; margin-bottom: 5px;">Nom</label>
                         <input type="text" name="nom" value="<?php echo htmlspecialchars($lieu['nom']); ?>" required
-                            style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            class="input-field">
                     </div>
 
                     <div style="flex: 1; min-width: 100px;">
                         <label style="display: block; font-weight: bold; font-size: 14px; margin-bottom: 5px;">Icône</label>
-                        <select name="icone" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                        <select name="icone" class="input-field">
                             <?php
                             $liste_icones = ['🎒', '🧳', '🚑', '🏥', '🏢', '💊', '🧊', '📦'];
                             foreach ($liste_icones as $ico) {
@@ -182,9 +170,9 @@ if ($lieu_id > 0) {
 
                     <div style="display: flex; gap: 10px;">
                         <button type="submit"
-                            style="padding: 9px 20px; background-color: #2c3e50; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Enregistrer</button>
+                            style="padding: 10px 20px; background-color: #2c3e50; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Enregistrer</button>
                         <button type="button" onclick="document.getElementById('zone-edition-lieu').style.display = 'none';"
-                            style="padding: 9px 15px; background-color: #ccc; border: none; border-radius: 4px; cursor: pointer;">Annuler</button>
+                            style="padding: 10px 15px; background-color: #ccc; border: none; border-radius: 4px; cursor: pointer;">Annuler</button>
                     </div>
                 </form>
             </div>
@@ -196,8 +184,8 @@ if ($lieu_id > 0) {
                 <form action="lieux.php" method="POST" style="display: flex; gap: 10px; align-items: center;">
                     <input type="hidden" name="action" value="supprimer_lieu">
                     <input type="hidden" name="lieu_id" value="<?php echo $lieu_id; ?>">
-                    <input type="text" name="confirmation_text" required placeholder="Tapez ici..."
-                        style="padding: 10px; border: 1px solid #ef6c00; border-radius: 4px; flex: 1;">
+                    <input type="text" name="confirmation_text" required placeholder="Tapez ici..." class="input-field"
+                        style="flex: 1;">
                     <button type="submit"
                         style="background-color: #d32f2f; color: white; border: none; padding: 10px 20px; border-radius: 4px; font-weight: bold; cursor: pointer;">Valider</button>
                     <button type="button" onclick="document.getElementById('zone-suppression').style.display = 'none';"
@@ -206,13 +194,13 @@ if ($lieu_id > 0) {
             </div>
         <?php endif; ?>
 
-        <div
-            style="background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; border: 1px solid #e0e0e0;">
+        <div class="form-container"
+            style="background: #fff; border: 1px solid #e0e0e0; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
             <strong style="color: #333;">🔍 Filtrer :</strong>
             <input type="text" id="searchBar" onkeyup="filtrerInventaire()" placeholder="Rechercher un matériel..."
-                style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; flex: 1; min-width: 150px;">
-            <select id="catFilter" onchange="filtrerInventaire()"
-                style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; min-width: 150px;">
+                class="input-field" style="flex: 1; min-width: 150px;">
+            <select id="catFilter" onchange="filtrerInventaire()" class="input-field"
+                style="min-width: 150px; flex: initial;">
                 <option value="">Toutes les catégories</option>
                 <?php foreach (array_keys($stocks_par_categorie) as $cat_nom): ?>
                     <option value="<?php echo htmlspecialchars($cat_nom); ?>"><?php echo htmlspecialchars($cat_nom); ?></option>
@@ -233,21 +221,17 @@ if ($lieu_id > 0) {
                 <div class="category-block" data-cat="<?php echo htmlspecialchars($categorie); ?>"
                     style="margin-bottom: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
                     <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
-                    <h3
-                        style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>; padding: 12px 15px; border-radius: 4px 4px 0 0; margin: 0; font-size: 16px;">
+                    <h3 class="category-header"
+                        style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
                         <?php echo htmlspecialchars($categorie); ?>
                     </h3>
 
-                    <table style="width: 100%; border-collapse: collapse; background: white;">
+                    <table class="table-manager">
                         <thead>
-                            <tr
-                                style="background-color: #f8f9fa; text-transform: uppercase; font-size: 11px; color: #666; letter-spacing: 0.5px;">
-                                <th style="padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; width: 50%;">NOM DU
-                                    MATÉRIEL</th>
-                                <th style="padding: 12px 15px; text-align: center; border-bottom: 1px solid #ddd; width: 25%;">
-                                    PÉREMPTION</th>
-                                <th style="padding: 12px 15px; text-align: center; border-bottom: 1px solid #ddd; width: 25%;">
-                                    QUANTITÉ</th>
+                            <tr>
+                                <th style="width: 50%;">NOM DU MATÉRIEL</th>
+                                <th style="text-align: center; width: 25%;">PÉREMPTION</th>
+                                <th style="text-align: center; width: 25%;">QUANTITÉ</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -256,14 +240,14 @@ if ($lieu_id > 0) {
                                 $affichage_date = $raw_date ? date('d/m/Y', strtotime($raw_date)) : '-';
                                 ?>
                                 <tr class="item-row" data-nom="<?php echo htmlspecialchars(strtolower($article['materiel_nom'])); ?>"
-                                    data-peremp="<?php echo $raw_date; ?>" style="border-bottom: 1px solid #eee;">
-                                    <td style="padding: 12px 15px; font-weight: 500; color: #444;">
+                                    data-peremp="<?php echo $raw_date; ?>" style="transition: background 0.2s;">
+                                    <td style="font-weight: 500; color: #444;">
                                         <?php echo htmlspecialchars($article['materiel_nom']); ?>
                                     </td>
-                                    <td style="padding: 12px 15px; text-align: center; color: #666;">
+                                    <td style="text-align: center; color: #666;">
                                         <?php echo $affichage_date; ?>
                                     </td>
-                                    <td style="padding: 12px 15px; text-align: center; font-size: 16px; font-weight: bold;">
+                                    <td style="text-align: center; font-size: 16px; font-weight: bold;">
                                         <?php echo $article['quantite']; ?>
                                     </td>
                                 </tr>
@@ -280,27 +264,21 @@ if ($lieu_id > 0) {
             const search = document.getElementById('searchBar').value.toLowerCase();
             const catFilter = document.getElementById('catFilter').value;
             const expFilter = document.getElementById('expFilter').checked;
-
             const limitDate = new Date();
             limitDate.setDate(limitDate.getDate() + 30);
 
             document.querySelectorAll('.category-block').forEach(block => {
                 const blockCat = block.getAttribute('data-cat');
                 let hasVisibleRow = false;
-
                 block.querySelectorAll('.item-row').forEach(row => {
                     const nom = row.getAttribute('data-nom');
                     const peremp = row.getAttribute('data-peremp');
                     let show = true;
-
                     if (search && !nom.includes(search)) show = false;
                     if (catFilter && blockCat !== catFilter) show = false;
                     if (expFilter) {
                         if (!peremp) show = false;
-                        else {
-                            const pDate = new Date(peremp);
-                            if (pDate > limitDate) show = false;
-                        }
+                        else { const pDate = new Date(peremp); if (pDate > limitDate) show = false; }
                     }
                     row.style.display = show ? '' : 'none';
                     if (show) hasVisibleRow = true;
@@ -333,20 +311,20 @@ else {
         <div id="form-nouveau-lieu"
             style="display: none; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 30px; border-left: 5px solid #2c3e50;">
             <h3 style="margin-top: 0;">Créer un nouveau stockage</h3>
-            <form action="lieux.php" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+            <form action="lieux.php" method="POST" class="form-group-inline">
                 <input type="hidden" name="action" value="creer_lieu">
                 <div style="flex: 1; min-width: 150px;"><label
                         style="display: block; font-weight: bold;">Catégorie</label><select name="type" required
-                        style="width: 100%; padding: 8px;">
+                        class="input-field">
                         <option value="sac_inter">Sac d'intervention</option>
                         <option value="sac_log">Sac Logistique</option>
                         <option value="armoire">Armoire</option>
                         <option value="boite">Boite</option>
                     </select></div>
                 <div style="flex: 2; min-width: 200px;"><label style="display: block; font-weight: bold;">Nom du
-                        stockage</label><input type="text" name="nom" required style="width: 100%; padding: 8px;"></div>
+                        stockage</label><input type="text" name="nom" required class="input-field"></div>
                 <div style="flex: 1; min-width: 100px;"><label style="display: block; font-weight: bold;">Icône</label><select
-                        name="icone" style="width: 100%; padding: 8px;">
+                        name="icone" class="input-field">
                         <option value="🎒">🎒</option>
                         <option value="🧳">🧳</option>
                         <option value="🚑">🚑</option>
@@ -357,7 +335,7 @@ else {
                         <option value="📦">📦</option>
                     </select></div>
                 <div><button type="submit"
-                        style="padding: 9px 20px; background-color: #d32f2f; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Valider</button>
+                        style="padding: 11px 20px; background-color: #d32f2f; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Valider</button>
                 </div>
             </form>
         </div>
