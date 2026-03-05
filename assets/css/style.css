@@ -1,0 +1,157 @@
+/* assets/css/style.css */
+
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f7f6;
+    margin: 0;
+    display: flex;
+    min-height: 100vh;
+}
+
+.sidebar {
+    width: 250px;
+    background-color: #2c3e50;
+    color: white;
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-logo {
+    text-align: center;
+    padding: 20px 10px;
+    background-color: #1a252f;
+    color: #d32f2f; /* Rouge Secourut's */
+    font-size: 18px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    border-bottom: 2px solid #d32f2f;
+}
+
+.sidebar-logo img {
+    width: 80px;
+    height: auto;
+    margin-bottom: 10px;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.sidebar a {
+    color: white;
+    text-decoration: none;
+    padding: 15px 20px;
+    border-bottom: 1px solid #34495e;
+    transition: background 0.3s;
+    display: block;
+}
+
+.sidebar a:hover {
+    background-color: #34495e;
+}
+
+/* Style spécifique pour le lien Admin dans le menu */
+.sidebar a.admin-link {
+    padding: 10px 15px;
+    border-left: 3px solid transparent;
+}
+
+.main-content {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.topbar {
+    background-color: #d32f2f;
+    color: white;
+    padding: 15px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.btn-logout {
+    background-color: white;
+    color: #d32f2f;
+    text-decoration: none;
+    padding: 8px 15px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.container {
+    padding: 20px;
+}
+
+/* Animation globale pour les grosses cartes cliquables */
+.carte-animee {
+    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+.carte-animee:hover {
+    transform: translateY(-4px) !important;
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15) !important;
+    border-color: #d32f2f !important;
+}
+/* Styles pour les blocs de contenu blancs */
+.white-box {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    margin-bottom: 20px;
+}
+
+/* Styles pour les tableaux */
+.table-manager {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+.table-manager thead tr {
+    background-color: #f8f9fa;
+    text-transform: uppercase;
+    font-size: 11px;
+    color: #666;
+    letter-spacing: 0.5px;
+}
+
+.table-manager th, .table-manager td {
+    padding: 12px 15px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+/* Styles pour les badges de catégories */
+.category-header {
+    padding: 12px 15px;
+    border-radius: 4px 4px 0 0;
+    margin: 0;
+    font-size: 16px;
+}
+
+/* Formulaires d'ajout/édition */
+.form-container {
+    background-color: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    border-left: 4px solid #2c3e50;
+}
+
+.form-group-inline {
+    display: flex;
+    gap: 15px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.input-field {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
