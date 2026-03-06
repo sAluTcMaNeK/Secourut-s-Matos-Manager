@@ -534,7 +534,7 @@ elseif ($inventaire_actif) {
 else {
     echo $message;
     $nb_catalog = $pdo->query("SELECT COUNT(*) FROM materiels")->fetchColumn();
-    $nb_objets_total = $pdo->query("SELECT SUM(quantite) FROM stocks")->fetchColumn() ?: 0;
+    $nb_objets_total = $pdo->query("SELECT TOTAL(quantite) FROM stocks")->fetchColumn() ?: 0;
     $stmt_dernier = $pdo->query("SELECT id, date_fin FROM inventaires WHERE statut = 'termine' ORDER BY date_fin DESC LIMIT 1");
     $dernier_inv = $stmt_dernier->fetch();
     $date_affichage = $dernier_inv ? date('d/m/Y à H:i', strtotime($dernier_inv['date_fin'])) : 'Jamais réalisé';

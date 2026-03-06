@@ -3,7 +3,6 @@
 require_once 'includes/auth.php';
 require_once 'config/db.php';
 
-$message = '';
 $peut_editer = ($_SESSION['can_edit'] === 1);
 
 try {
@@ -11,61 +10,73 @@ try {
 } catch (PDOException $e) {
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$peut_editer) {
-    $message = '<div style="background-color: #ffebee; color: #c62828; padding: 10px; border-radius: 4px; margin-bottom: 20px;">🛑 Action bloquée : Vous n\'avez pas les droits de modification.</div>';
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'supprimer_lieu' && $peut_editer) {
-    $id_a_supprimer = (int) $_POST['lieu_id'];
-    $confirmation = trim($_POST['confirmation_text']);
-    if ($confirmation === 'CONFIRMER') {
-        try {
-            $pdo->prepare("DELETE FROM lieux_stockage WHERE id = :id")->execute(['id' => $id_a_supprimer]);
-            header("Location: lieux.php?msg=deleted");
-            exit;
-        } catch (PDOException $e) {
-            $message = '<div style="background-color: #ffebee; color: #c62828; padding: 10px; border-radius: 4px; margin-bottom: 20px;">❌ Erreur lors de la suppression.</div>';
-        }
-    } else {
-        $message = '<div style="background-color: #fff3e0; color: #ef6c00; padding: 10px; border-radius: 4px; margin-bottom: 20px;">⚠️ Le mot "CONFIRMER" est obligatoire pour valider la suppression.</div>';
+// ==========================================
+// TRAITEMENT DES ACTIONS (PATTERN PRG)
+// ==========================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!$peut_editer) {
+        $_SESSION['flash_error'] = "🛑 Action bloquée : Vous n'avez pas les droits de modification.";
+        header("Location: lieux.php");
+        exit;
     }
-}
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'creer_lieu' && $peut_editer) {
-    $nom = trim($_POST['nom']);
-    $type = $_POST['type'];
-    $icone = $_POST['icone'];
-    if (!empty($nom) && !empty($type)) {
-        try {
-            $pdo->prepare("INSERT INTO lieux_stockage (nom, type, icone) VALUES (:nom, :type, :icone)")->execute(['nom' => $nom, 'type' => $type, 'icone' => $icone]);
-            $message = '<div style="background-color: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 4px; margin-bottom: 20px;">✅ Le nouveau stockage a été créé !</div>';
-        } catch (PDOException $e) {
-            $message = '<div style="background-color: #ffebee; color: #c62828; padding: 10px; border-radius: 4px; margin-bottom: 20px;">❌ Erreur : Ce nom existe déjà.</div>';
+    $action = $_POST['action'] ?? '';
+
+    if ($action === 'supprimer_lieu') {
+        $id_a_supprimer = (int) $_POST['lieu_id'];
+        $confirmation = trim($_POST['confirmation_text']);
+        if ($confirmation === 'CONFIRMER') {
+            try {
+                $pdo->prepare("DELETE FROM lieux_stockage WHERE id = :id")->execute(['id' => $id_a_supprimer]);
+                $_SESSION['flash_success'] = "🗑️ Le stockage a été définitivement supprimé.";
+            } catch (PDOException $e) {
+                $_SESSION['flash_error'] = "❌ Erreur lors de la suppression.";
+            }
+        } else {
+            $_SESSION['flash_error'] = "⚠️ Le mot 'CONFIRMER' est obligatoire pour valider la suppression.";
         }
+        header("Location: lieux.php");
+        exit;
     }
-}
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'modifier_lieu' && $peut_editer) {
-    $id = (int) $_POST['lieu_id'];
-    $nom = trim($_POST['nom']);
-    $type = $_POST['type'];
-    $icone = $_POST['icone'];
-    if ($id > 0 && !empty($nom) && !empty($type)) {
-        try {
-            $pdo->prepare("UPDATE lieux_stockage SET nom = :nom, type = :type, icone = :icone WHERE id = :id")->execute(['nom' => $nom, 'type' => $type, 'icone' => $icone, 'id' => $id]);
-            $message = '<div style="background-color: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 4px; margin-bottom: 20px;">✅ Paramètres mis à jour !</div>';
-        } catch (PDOException $e) {
-            $message = '<div style="background-color: #ffebee; color: #c62828; padding: 10px; border-radius: 4px; margin-bottom: 20px;">❌ Erreur lors de la modification.</div>';
+    if ($action === 'creer_lieu') {
+        $nom = trim($_POST['nom']);
+        $type = $_POST['type'];
+        $icone = $_POST['icone'];
+        if (!empty($nom) && !empty($type)) {
+            try {
+                $pdo->prepare("INSERT INTO lieux_stockage (nom, type, icone) VALUES (:nom, :type, :icone)")->execute(['nom' => $nom, 'type' => $type, 'icone' => $icone]);
+                $_SESSION['flash_success'] = "✅ Le nouveau stockage a été créé !";
+            } catch (PDOException $e) {
+                $_SESSION['flash_error'] = "❌ Erreur : Ce nom existe déjà.";
+            }
         }
+        header("Location: lieux.php");
+        exit;
     }
-}
 
-if (isset($_GET['msg']) && $_GET['msg'] === 'deleted') {
-    $message = '<div style="background-color: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 4px; margin-bottom: 20px;">🗑️ Le stockage a été définitivement supprimé.</div>';
+    if ($action === 'modifier_lieu') {
+        $id = (int) $_POST['lieu_id'];
+        $nom = trim($_POST['nom']);
+        $type = $_POST['type'];
+        $icone = $_POST['icone'];
+        if ($id > 0 && !empty($nom) && !empty($type)) {
+            try {
+                $pdo->prepare("UPDATE lieux_stockage SET nom = :nom, type = :type, icone = :icone WHERE id = :id")->execute(['nom' => $nom, 'type' => $type, 'icone' => $icone, 'id' => $id]);
+                $_SESSION['flash_success'] = "✅ Paramètres mis à jour !";
+            } catch (PDOException $e) {
+                $_SESSION['flash_error'] = "❌ Erreur lors de la modification.";
+            }
+        }
+        header("Location: lieux.php?id=" . $id);
+        exit;
+    }
 }
 
 $lieu_id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 require_once 'includes/header.php';
+
+// ... SUITE DU CODE HTML
 
 // ==========================================
 // MODE 1 : AFFICHAGE DU CONTENU D'UN SAC
@@ -93,7 +104,6 @@ if ($lieu_id > 0) {
     ?>
 
     <div class="white-box">
-        <?php echo $message; ?>
 
         <div
             style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f0f0f0; padding-bottom: 15px; margin-bottom: 20px;">
@@ -304,8 +314,6 @@ else {
                 Ajouter un stockage</button>
         <?php endif; ?>
     </div>
-
-    <?php echo $message; ?>
 
     <?php if ($peut_editer): ?>
         <div id="form-nouveau-lieu"

@@ -6,7 +6,91 @@ require_once 'config/db.php';
 $lieu_id = isset($_GET['lieu_id']) ? (int) $_GET['lieu_id'] : 0;
 $peut_editer = ($_SESSION['can_edit'] === 1);
 
+// ==========================================
+// TRAITEMENT DES FORMULAIRES (PATTERN PRG)
+// ==========================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!$peut_editer) {
+        $_SESSION['flash_error'] = "🛑 Action bloquée : Vous n'avez pas les droits de modification.";
+        header("Location: remplissage.php?lieu_id=" . $lieu_id);
+        exit;
+    }
+
+    $action = $_POST['action'] ?? '';
+
+    $stmt_nom_lieu = $pdo->prepare("SELECT nom FROM lieux_stockage WHERE id = ?");
+    $stmt_nom_lieu->execute([$lieu_id]);
+    $nom_du_lieu = $stmt_nom_lieu->fetchColumn() ?: "Lieu inconnu";
+
+    try {
+        if ($action === 'edit_stock') {
+            $stock_id = (int) $_POST['stock_id'];
+            $qty = (int) $_POST['quantite'];
+            $date_p = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
+
+            $stmt_mat_nom = $pdo->prepare("SELECT m.nom FROM materiels m JOIN stocks s ON m.id = s.materiel_id WHERE s.id = ?");
+            $stmt_mat_nom->execute([$stock_id]);
+            $nom_mat_edit = $stmt_mat_nom->fetchColumn() ?: "Objet";
+
+            if ($qty <= 0) {
+                $pdo->prepare("DELETE FROM stocks WHERE id = :id")->execute(['id' => $stock_id]);
+                $action_texte = "A retiré l'objet '" . $nom_mat_edit . "' du lieu : " . $nom_du_lieu;
+                $_SESSION['flash_success'] = "✅ Objet retiré du stockage.";
+            } else {
+                $pdo->prepare("UPDATE stocks SET quantite = :qty, date_peremption = :dp WHERE id = :id")->execute(['qty' => $qty, 'dp' => $date_p, 'id' => $stock_id]);
+                $action_texte = "A mis à jour la quantité de '" . $nom_mat_edit . "' (Lieu : " . $nom_du_lieu . ")";
+                $_SESSION['flash_success'] = "✅ Quantité mise à jour.";
+            }
+            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+
+        } elseif ($action === 'delete_stock') {
+            $stock_id = (int) $_POST['stock_id'];
+            $stmt_mat_nom = $pdo->prepare("SELECT m.nom FROM materiels m JOIN stocks s ON m.id = s.materiel_id WHERE s.id = ?");
+            $stmt_mat_nom->execute([$stock_id]);
+            $nom_mat_del = $stmt_mat_nom->fetchColumn() ?: "Objet";
+
+            $pdo->prepare("DELETE FROM stocks WHERE id = :id")->execute(['id' => $stock_id]);
+
+            $action_texte = "A supprimé définitivement '" . $nom_mat_del . "' (Lieu : " . $nom_du_lieu . ")";
+            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+
+            $_SESSION['flash_success'] = "🗑️ L'objet a été retiré du sac.";
+
+        } elseif ($action === 'add_stock') {
+            $materiel_id = (int) $_POST['materiel_id'];
+            $quantite = (int) $_POST['quantite'];
+            $date_peremption = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
+            if ($materiel_id && $quantite > 0) {
+                $stmt_check = $pdo->prepare("SELECT id, quantite FROM stocks WHERE materiel_id = :mat AND lieu_id = :lieu AND IFNULL(date_peremption, '') = IFNULL(:peremp, '')");
+                $stmt_check->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'peremp' => $date_peremption]);
+                $stock_existant = $stmt_check->fetch();
+                if ($stock_existant) {
+                    $pdo->prepare("UPDATE stocks SET quantite = :qty WHERE id = :id")->execute(['qty' => $stock_existant['quantite'] + $quantite, 'id' => $stock_existant['id']]);
+                } else {
+                    $pdo->prepare("INSERT INTO stocks (materiel_id, lieu_id, quantite, date_peremption) VALUES (:mat, :lieu, :qty, :peremp)")->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'qty' => $quantite, 'peremp' => $date_peremption]);
+                }
+
+                $stmt_nom = $pdo->prepare("SELECT nom FROM materiels WHERE id = ?");
+                $stmt_nom->execute([$materiel_id]);
+                $nom_mat = $stmt_nom->fetchColumn() ?: "Objet inconnu";
+
+                $action_texte = "A ajouté $quantite x $nom_mat dans : $nom_du_lieu";
+                $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+
+                $_SESSION['flash_success'] = "➕ Matériel inséré avec succès.";
+            }
+        }
+        header("Location: remplissage.php?lieu_id=" . $lieu_id);
+        exit;
+    } catch (PDOException $e) {
+        $_SESSION['flash_error'] = "❌ Erreur : " . $e->getMessage();
+        header("Location: remplissage.php?lieu_id=" . $lieu_id);
+        exit;
+    }
+}
+
 if ($lieu_id === 0) {
+    // ... SUITE DU CODE HTML (Aucun changement à faire)
     require_once 'includes/header.php';
     $lieux = $pdo->query("SELECT * FROM lieux_stockage ORDER BY type, nom")->fetchAll();
     ?>

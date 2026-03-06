@@ -1,0 +1,13 @@
+{
+    "name": "manek/secourutsmatosmanager",
+    "description": "Gestion matériel Secourut's",
+    "authors": [
+        {
+            "name": "Manek Le Sager"
+        }
+    ],
+    "require": {
+        "league/oauth2-client": "^2.9",
+        "vlucas/phpdotenv": "^5.6"
+    }
+}

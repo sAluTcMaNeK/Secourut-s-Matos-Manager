@@ -3,7 +3,6 @@
 require_once 'includes/auth.php';
 require_once 'config/db.php';
 
-$message = '';
 $peut_editer = ($_SESSION['can_edit'] === 1);
 
 try {
@@ -12,32 +11,33 @@ try {
 }
 
 // ==========================================
-// 1. TRAITEMENT DES ACTIONS (SÉCURISÉ)
+// 1. TRAITEMENT DES ACTIONS (PATTERN PRG)
 // ==========================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!$peut_editer) {
+        $_SESSION['flash_error'] = "🛑 Vous n'avez pas les droits de modification.";
+        header("Location: materiel.php");
+        exit;
+    }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $peut_editer) {
-
-    // A. SUPPRESSION D'UN MATÉRIEL
     if (isset($_POST['action']) && $_POST['action'] === 'delete_materiel') {
         $id_a_supprimer = (int) $_POST['materiel_id'];
         try {
-            // On récupère le nom avant de supprimer pour l'historique
             $nom_supprime = $pdo->query("SELECT nom FROM materiels WHERE id = $id_a_supprimer")->fetchColumn();
+            $pdo->prepare("DELETE FROM materiels WHERE id = :id")->execute(['id' => $id_a_supprimer]);
 
-            $stmt = $pdo->prepare("DELETE FROM materiels WHERE id = :id");
-            $stmt->execute(['id' => $id_a_supprimer]);
-
-            // --- HISTORIQUE ---
+            // Historique
             $action_texte = "A supprimé la référence : " . $nom_supprime;
             $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
 
-            $message = '<div style="background-color: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 4px; margin-bottom: 20px; border-left: 4px solid #2e7d32;">✅ Référence supprimée du catalogue.</div>';
+            $_SESSION['flash_success'] = "✅ Référence supprimée du catalogue.";
         } catch (PDOException $e) {
-            $message = '<div style="background-color: #ffebee; color: #c62828; padding: 10px; border-radius: 4px; margin-bottom: 20px; border-left: 4px solid #c62828;">❌ Erreur lors de la suppression.</div>';
+            $_SESSION['flash_error'] = "❌ Erreur lors de la suppression.";
         }
+        header("Location: materiel.php");
+        exit;
     }
 
-    // B. AJOUT D'UN MATÉRIEL
     if (isset($_POST['action']) && $_POST['action'] === 'add_materiel') {
         $nom = trim($_POST['nom']);
         $categorie_id = $_POST['categorie_id'];
@@ -46,21 +46,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $peut_editer) {
 
         if (!empty($nom) && !empty($categorie_id)) {
             try {
-                $stmt = $pdo->prepare("INSERT INTO materiels (nom, categorie_id, seuil_alerte, fournisseur) VALUES (:nom, :cat_id, :seuil, :fournisseur)");
-                $stmt->execute(['nom' => $nom, 'cat_id' => $categorie_id, 'seuil' => $seuil_alerte, 'fournisseur' => $fournisseur]);
+                $pdo->prepare("INSERT INTO materiels (nom, categorie_id, seuil_alerte, fournisseur) VALUES (:nom, :cat_id, :seuil, :fournisseur)")->execute(['nom' => $nom, 'cat_id' => $categorie_id, 'seuil' => $seuil_alerte, 'fournisseur' => $fournisseur]);
 
-                // --- HISTORIQUE ---
+                // Historique
                 $action_texte = "A ajouté une nouvelle référence : " . $nom;
                 $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
 
-                $message = '<div style="background-color: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 4px; margin-bottom: 20px; border-left: 4px solid #2e7d32;">✅ Matériel ajouté au catalogue !</div>';
+                $_SESSION['flash_success'] = "✅ Matériel ajouté au catalogue !";
             } catch (PDOException $e) {
-                $message = '<div style="background-color: #ffebee; color: #c62828; padding: 10px; border-radius: 4px; margin-bottom: 20px;">❌ Erreur : ' . $e->getMessage() . '</div>';
+                $_SESSION['flash_error'] = "❌ Erreur : " . $e->getMessage();
             }
         }
+        header("Location: materiel.php");
+        exit;
     }
 
-    // C. MODIFICATION D'UN MATÉRIEL
     if (isset($_POST['action']) && $_POST['action'] === 'edit_materiel') {
         $id = (int) $_POST['materiel_id'];
         $nom = trim($_POST['nom']);
@@ -70,37 +70,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $peut_editer) {
 
         if ($id > 0 && !empty($nom) && !empty($categorie_id)) {
             try {
-                $stmt = $pdo->prepare("UPDATE materiels SET nom = :nom, categorie_id = :cat_id, seuil_alerte = :seuil, fournisseur = :fournisseur WHERE id = :id");
-                $stmt->execute(['nom' => $nom, 'cat_id' => $categorie_id, 'seuil' => $seuil_alerte, 'fournisseur' => $fournisseur, 'id' => $id]);
+                $pdo->prepare("UPDATE materiels SET nom = :nom, categorie_id = :cat_id, seuil_alerte = :seuil, fournisseur = :fournisseur WHERE id = :id")->execute(['nom' => $nom, 'cat_id' => $categorie_id, 'seuil' => $seuil_alerte, 'fournisseur' => $fournisseur, 'id' => $id]);
 
-                // --- HISTORIQUE ---
+                // Historique
                 $action_texte = "A modifié la référence : " . $nom;
                 $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
 
-                $message = '<div style="background-color: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 4px; margin-bottom: 20px; border-left: 4px solid #2e7d32;">✏️ Modifications enregistrées avec succès !</div>';
+                $_SESSION['flash_success'] = "✏️ Modifications enregistrées avec succès !";
             } catch (PDOException $e) {
-                $message = '<div style="background-color: #ffebee; color: #c62828; padding: 10px; border-radius: 4px; margin-bottom: 20px;">❌ Erreur : ' . $e->getMessage() . '</div>';
+                $_SESSION['flash_error'] = "❌ Erreur : " . $e->getMessage();
             }
         }
+        header("Location: materiel.php");
+        exit;
     }
-} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && !$peut_editer) {
-    $message = '<div style="background-color: #ffebee; color: #c62828; padding: 10px; border-radius: 4px; margin-bottom: 20px;">🛑 Vous n\'avez pas les droits de modification.</div>';
 }
 
-// ==========================================
-// 2. RÉCUPÉRATION DES DONNÉES
-// ==========================================
 $stmt_cat = $pdo->query("SELECT * FROM categories ORDER BY nom");
 $categories = $stmt_cat->fetchAll();
 
-$stmt_mat = $pdo->query("
-    SELECT m.id, m.nom, m.seuil_alerte, m.fournisseur, m.categorie_id, c.nom AS categorie_nom 
-    FROM materiels m 
-    JOIN categories c ON m.categorie_id = c.id 
-    ORDER BY c.nom, m.nom
-");
+$stmt_mat = $pdo->query("SELECT m.id, m.nom, m.seuil_alerte, m.fournisseur, m.categorie_id, c.nom AS categorie_nom FROM materiels m JOIN categories c ON m.categorie_id = c.id ORDER BY c.nom, m.nom");
 $materiels_bruts = $stmt_mat->fetchAll();
-
 $materiels_par_categorie = [];
 foreach ($materiels_bruts as $mat) {
     $materiels_par_categorie[$mat['categorie_nom']][] = $mat;
@@ -113,7 +103,6 @@ require_once 'includes/header.php';
 
     <?php if ($peut_editer): ?>
         <div style="flex: 1; min-width: 300px;">
-            <?php echo $message; ?>
 
             <div id="bloc-ajout" class="white-box">
                 <h2 style="margin-top: 0; color: #d32f2f; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">➕ Ajouter
