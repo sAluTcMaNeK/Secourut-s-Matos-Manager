@@ -6,21 +6,28 @@ body {
     margin: 0;
     display: flex;
     min-height: 100vh;
+    overflow-x: hidden;
+    /* Empêche le débordement horizontal global */
 }
 
+/* === MENU LATÉRAL === */
 .sidebar {
     width: 250px;
     background-color: #2c3e50;
     color: white;
     display: flex;
     flex-direction: column;
+    z-index: 1000;
+    /* Toujours au premier plan */
+    transition: left 0.3s ease;
+    /* Animation fluide */
 }
 
 .sidebar-logo {
     text-align: center;
     padding: 20px 10px;
     background-color: #1a252f;
-    color: #d32f2f; /* Rouge Secourut's */
+    color: #d32f2f;
     font-size: 18px;
     font-weight: bold;
     letter-spacing: 1px;
@@ -49,16 +56,18 @@ body {
     background-color: #34495e;
 }
 
-/* Style spécifique pour le lien Admin dans le menu */
 .sidebar a.admin-link {
     padding: 10px 15px;
     border-left: 3px solid transparent;
 }
 
+/* === CONTENU PRINCIPAL === */
 .main-content {
     flex-grow: 1;
     display: flex;
     flex-direction: column;
+    width: 100%;
+    /* S'assure qu'il prend tout l'espace restant */
 }
 
 .topbar {
@@ -78,13 +87,14 @@ body {
     border-radius: 4px;
     font-weight: bold;
     font-size: 14px;
+    white-space: nowrap;
 }
 
 .container {
     padding: 20px;
 }
 
-/* Animation globale pour les grosses cartes cliquables */
+/* Animation globale pour les cartes */
 .carte-animee {
     transition: transform 0.2s ease, box-shadow 0.2s ease !important;
 }
@@ -94,16 +104,16 @@ body {
     box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15) !important;
     border-color: #d32f2f !important;
 }
-/* Styles pour les blocs de contenu blancs */
+
+/* === CLASSES RÉUTILISABLES (V2) === */
 .white-box {
     background: white;
     padding: 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     margin-bottom: 20px;
 }
 
-/* Styles pour les tableaux */
 .table-manager {
     width: 100%;
     border-collapse: collapse;
@@ -118,13 +128,13 @@ body {
     letter-spacing: 0.5px;
 }
 
-.table-manager th, .table-manager td {
+.table-manager th,
+.table-manager td {
     padding: 12px 15px;
     text-align: left;
     border-bottom: 1px solid #ddd;
 }
 
-/* Styles pour les badges de catégories */
 .category-header {
     padding: 12px 15px;
     border-radius: 4px 4px 0 0;
@@ -132,7 +142,6 @@ body {
     font-size: 16px;
 }
 
-/* Formulaires d'ajout/édition */
 .form-container {
     background-color: #f8f9fa;
     padding: 15px;
@@ -154,4 +163,84 @@ body {
     border: 1px solid #ccc;
     border-radius: 4px;
     box-sizing: border-box;
+}
+
+/* Bouton Menu Mobile & Fond sombre (cachés sur PC) */
+.btn-menu-mobile {
+    display: none;
+    background: none;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    margin-right: 15px;
+    padding: 0;
+}
+
+.overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 999;
+}
+
+
+/* ========================================== */
+/* 📱 RESPONSIVE DESIGN (MOBILES & TABLETTES) */
+/* ========================================== */
+@media (max-width: 768px) {
+
+    /* 1. Le menu latéral se cache sur la gauche */
+    .sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: -250px;
+        /* Caché par défaut */
+    }
+
+    /* Classe ajoutée en Javascript quand on clique sur le bouton Menu */
+    .sidebar.ouvert {
+        left: 0;
+        box-shadow: 2px 0 10px rgba(0, 0, 0, 0.5);
+    }
+
+    /* 2. On affiche le bouton Hamburger */
+    .btn-menu-mobile {
+        display: inline-block;
+    }
+
+    /* 3. Ajustement de la Topbar */
+    .topbar {
+        padding: 12px 15px;
+        font-size: 14px;
+    }
+
+    .topbar>div {
+        display: flex;
+        align-items: center;
+    }
+
+    /* 4. Réduction des marges globales */
+    .container {
+        padding: 10px;
+    }
+
+    .white-box {
+        padding: 15px;
+    }
+
+    /* 5. Les tableaux deviennent scrollables de gauche à droite au lieu de s'écraser */
+    .table-manager {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+        /* Force les textes sur une seule ligne */
+        -webkit-overflow-scrolling: touch;
+        /* Scroll fluide sur iPhone */
+    }
 }
