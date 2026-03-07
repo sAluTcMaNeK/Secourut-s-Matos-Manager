@@ -1,0 +1,2 @@
+si rien dans sac, inventaire soft lock
+message bizarre si uniquement perm consultation

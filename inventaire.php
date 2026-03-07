@@ -199,7 +199,8 @@ if ($action === 'rapport') {
                     Retour au résumé</a>
                 <h2 style="margin: 10px 0 0 0; color: #d32f2f;">📊 Rapport d'inventaire</h2>
                 <p style="margin: 5px 0 0 0; color: #666; font-style: italic;">Clôturé le
-                    <?php echo date('d/m/Y à H:i', strtotime($inv['date_fin'])); ?></p>
+                    <?php echo date('d/m/Y à H:i', strtotime($inv['date_fin'])); ?>
+                </p>
             </div>
             <div class="no-print" style="display: flex; gap: 10px;">
                 <a href="inventaire.php?action=export_xls" class="carte-animee"
@@ -233,14 +234,18 @@ if ($action === 'rapport') {
                         $signe = $ecart > 0 ? '+' : ''; ?>
                         <tr>
                             <td style="font-weight: bold; border-right: 1px solid #eee;">
-                                <?php echo $d['lieu_icone'] . ' ' . htmlspecialchars($d['lieu_nom']); ?></td>
+                                <?php echo $d['lieu_icone'] . ' ' . htmlspecialchars($d['lieu_nom']); ?>
+                            </td>
                             <td style="border-right: 1px solid #eee;"><?php echo htmlspecialchars($d['materiel_nom']); ?></td>
                             <td style="text-align: center; color: #999; border-right: 1px solid #eee;">
-                                <?php echo $d['qte_avant']; ?></td>
+                                <?php echo $d['qte_avant']; ?>
+                            </td>
                             <td style="text-align: center; font-weight: bold; border-right: 1px solid #eee;">
-                                <?php echo $d['qte_apres']; ?></td>
+                                <?php echo $d['qte_apres']; ?>
+                            </td>
                             <td style="text-align: center; font-weight: bold; color: <?php echo $couleur_ecart; ?>;">
-                                <?php echo $signe . $ecart; ?></td>
+                                <?php echo $signe . $ecart; ?>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -255,7 +260,8 @@ if ($action === 'rapport') {
                 <div style="page-break-inside: avoid; margin-bottom: 20px;">
                     <h4
                         style="background-color: #e0e0e0; color: #333; padding: 8px 15px; border-radius: 4px 4px 0 0; margin: 0; font-size: 15px; border: 1px solid #ccc; border-bottom: none;">
-                        <?php echo htmlspecialchars($articles[0]['lieu_icone'] . ' ' . $lieu_nom); ?></h4>
+                        <?php echo htmlspecialchars($articles[0]['lieu_icone'] . ' ' . $lieu_nom); ?>
+                    </h4>
                     <table class="table-manager" style="border: 1px solid #ccc; margin-bottom: 10px;">
                         <thead>
                             <tr>
@@ -269,9 +275,11 @@ if ($action === 'rapport') {
                             <?php foreach ($articles as $art): ?>
                                 <tr>
                                     <td style="border-right: 1px solid #eee; font-size: 13px;">
-                                        <?php echo htmlspecialchars($art['categorie_nom']); ?></td>
+                                        <?php echo htmlspecialchars($art['categorie_nom']); ?>
+                                    </td>
                                     <td style="border-right: 1px solid #eee; font-size: 13px; font-weight: 500;">
-                                        <?php echo htmlspecialchars($art['materiel_nom']); ?></td>
+                                        <?php echo htmlspecialchars($art['materiel_nom']); ?>
+                                    </td>
                                     <td style="text-align: center; font-size: 12px; color: #666; border-right: 1px solid #eee;">
                                         <?php echo $art['date_peremption'] ? date('d/m/Y', strtotime($art['date_peremption'])) : '-'; ?>
                                     </td>
@@ -329,7 +337,8 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                 <div
                     style="background: #fff3e0; padding: 10px 20px; border-radius: 8px; text-align: center; border: 1px solid #ffe0b2;">
                     <div style="font-size: 24px; font-weight: bold; color: #ef6c00;" id="compteur-restants">
-                        <?php echo count($stocks); ?></div>
+                        <?php echo count($stocks); ?>
+                    </div>
                     <div style="font-size: 12px; color: #ef6c00; text-transform: uppercase;">À vérifier</div>
                 </div>
             </div>
@@ -346,7 +355,8 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                     <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
                     <h3 class="category-header"
                         style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                        <?php echo htmlspecialchars($categorie); ?></h3>
+                        <?php echo htmlspecialchars($categorie); ?>
+                    </h3>
 
                     <table class="table-manager">
                         <thead>
@@ -366,7 +376,8 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                                         <?php echo $art['date_peremption'] ? date('d/m/Y', strtotime($art['date_peremption'])) : '-'; ?>
                                     </td>
                                     <td style="text-align: center; font-size: 18px; font-weight: bold; color: #999;">
-                                        <?php echo $art['quantite']; ?></td>
+                                        <?php echo $art['quantite']; ?>
+                                    </td>
                                     <td style="text-align: center;"><input type="number" min="0"
                                             name="comptage[<?php echo $art['stock_id']; ?>]" class="input-comptage"
                                             data-attendu="<?php echo $art['quantite']; ?>" oninput="verifierLigne(this)" placeholder="?"
@@ -384,31 +395,6 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                 style="background-color: #2e7d32; color: white; border: none; padding: 15px 40px; font-size: 20px; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(46,125,50,0.3);">✅
                 Enregistrer ce sac</button></div>
     </form>
-
-    <script>
-        function verifierLigne(inputField) {
-            const row = inputField.closest('.item-row');
-            const valeurAttendue = parseInt(inputField.getAttribute('data-attendu'));
-            const valeurSaisie = inputField.value;
-            if (valeurSaisie === '') { row.style.backgroundColor = 'transparent'; inputField.style.borderColor = '#ccc'; row.setAttribute('data-etat', 'vide'); }
-            else if (parseInt(valeurSaisie) === valeurAttendue) { row.style.backgroundColor = '#e8f5e9'; inputField.style.borderColor = '#4caf50'; row.setAttribute('data-etat', 'bon'); }
-            else { row.style.backgroundColor = '#ffebee'; inputField.style.borderColor = '#f44336'; row.setAttribute('data-etat', 'erreur'); }
-            recalculerCompteurs();
-        }
-        function recalculerCompteurs() {
-            const toutesLesLignes = document.querySelectorAll('.item-row');
-            let nbBons = 0;
-            toutesLesLignes.forEach(row => { if (row.getAttribute('data-etat') === 'bon') nbBons++; });
-            document.getElementById('compteur-valides').innerText = nbBons;
-            document.getElementById('compteur-restants').innerText = (toutesLesLignes.length - nbBons);
-        }
-        function validerFormulaire() {
-            const lignesVides = document.querySelectorAll('.item-row[data-etat="vide"]').length;
-            if (lignesVides > 0) { if (!confirm(lignesVides + " articles n'ont pas été remplis. Leurs quantités théoriques seront conservées. Es-tu sûr de vouloir valider ce sac ?")) return; }
-            else { if (!confirm("Tout a été pointé. Es-tu sûr de vouloir valider et clôturer l'inventaire de ce lieu ?")) return; }
-            document.getElementById('form-inventaire').submit();
-        }
-    </script>
     <?php
 }
 
@@ -489,42 +475,6 @@ elseif ($inventaire_actif) {
             </a>
         <?php endif; ?>
     </div>
-
-    <script>
-        setInterval(function () {
-            fetch('api_inventaire.php')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        const lieuxFaits = data.lieux_faits;
-                        const totalLieux = parseInt(document.getElementById('compteur-total').innerText);
-                        let nombreFaitsActuel = 0;
-
-                        document.querySelectorAll('.lieu-container').forEach(container => {
-                            const id = parseInt(container.getAttribute('data-id'));
-                            const nom = container.getAttribute('data-nom');
-                            if (lieuxFaits.includes(id)) {
-                                nombreFaitsActuel++;
-                                if (!container.innerHTML.includes('✅')) {
-                                    container.innerHTML = `
-                                    <div style="display: block; width: 200px; padding: 20px; background-color: #e8f5e9; border: 2px solid #4caf50; border-radius: 8px; color: #2e7d32; text-align: center; opacity: 0.7; box-sizing: border-box;">
-                                        <div style="font-size: 40px; margin-bottom: 10px;">✅</div>
-                                        <strong style="font-size: 16px; display: block; text-decoration: line-through;">${nom}</strong>
-                                        <span style="font-size: 12px; font-weight: bold; margin-top: 10px; display: block;">Déjà pointé</span>
-                                    </div>
-                                `;
-                                }
-                            }
-                        });
-                        document.getElementById('compteur-faits').innerText = nombreFaitsActuel;
-                        if (nombreFaitsActuel >= totalLieux && totalLieux > 0) {
-                            document.getElementById('zone-cloture').style.display = 'block';
-                        }
-                    }
-                })
-                .catch(error => console.error("Synchronisation...", error));
-        }, 3000);
-    </script>
     <?php
 }
 
@@ -594,7 +544,8 @@ else {
                     <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
                     <h3 class="category-header"
                         style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                        <?php echo htmlspecialchars($categorie); ?></h3>
+                        <?php echo htmlspecialchars($categorie); ?>
+                    </h3>
                     <table class="table-manager" style="border: 1px solid #eee;">
                         <thead>
                             <tr>
@@ -612,7 +563,8 @@ else {
                                     <td style="font-weight: 500; color: #333; border-right: 1px solid #eee;">
                                         <?php echo htmlspecialchars($nom_mat); ?>
                                         <div style="font-size: 11px; color: #999; margin-top: 5px;">Total dispo :
-                                            <strong><?php echo $somme_totale_objet; ?></strong></div>
+                                            <strong><?php echo $somme_totale_objet; ?></strong>
+                                        </div>
                                     </td>
                                     <td style="font-size: 14px; color: #555;">
                                         <div style="display: flex; gap: 10px; flex-wrap: wrap;"><?php foreach ($lieux as $l): ?><span

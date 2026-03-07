@@ -248,24 +248,6 @@ require_once 'includes/header.php';
 </div>
 
 <?php if ($peut_editer): ?>
-    <script>
-        function ouvrirEdition(id, nom, categorie_id, fournisseur, seuil) {
-            document.getElementById('bloc-ajout').style.display = 'none';
-            document.getElementById('bloc-edition').style.display = 'block';
-
-            document.getElementById('edit_id').value = id;
-            document.getElementById('edit_nom').value = nom;
-            document.getElementById('edit_categorie_id').value = categorie_id;
-            document.getElementById('edit_fournisseur').value = fournisseur;
-            document.getElementById('edit_seuil_alerte').value = seuil;
-
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-        function fermerEdition() {
-            document.getElementById('bloc-edition').style.display = 'none';
-            document.getElementById('bloc-ajout').style.display = 'block';
-        }
-    </script>
 <?php endif; ?>
 
 <?php require_once 'includes/footer.php'; ?>

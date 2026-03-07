@@ -1,418 +1,344 @@
 <?php
-// remplissage.php
+// remplissage.php (Tableau de bord des DPS / Vérifications)
 require_once 'includes/auth.php';
 require_once 'config/db.php';
 
-$lieu_id = isset($_GET['lieu_id']) ? (int) $_GET['lieu_id'] : 0;
+// --- NOUVEAU : Vérification des droits ---
 $peut_editer = ($_SESSION['can_edit'] === 1);
+$est_admin = (isset($_SESSION['role']) && $_SESSION['role'] === 'admin');
+
+$action = $_GET['action'] ?? 'dashboard';
 
 // ==========================================
-// TRAITEMENT DES FORMULAIRES (PATTERN PRG)
+// 1. TRAITEMENT DES ACTIONS (CRÉER, MODIFIER, SUPPRIMER)
 // ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!$peut_editer) {
-        $_SESSION['flash_error'] = "🛑 Action bloquée : Vous n'avez pas les droits de modification.";
-        header("Location: remplissage.php?lieu_id=" . $lieu_id);
+
+    // SÉCURITÉ : Seuls les admins peuvent faire ces actions
+    if (!$est_admin) {
+        $_SESSION['flash_error'] = "🛑 Action refusée : Seuls les administrateurs peuvent gérer les DPS.";
+        header("Location: remplissage.php");
         exit;
     }
 
-    $action = $_POST['action'] ?? '';
-
-    $stmt_nom_lieu = $pdo->prepare("SELECT nom FROM lieux_stockage WHERE id = ?");
-    $stmt_nom_lieu->execute([$lieu_id]);
-    $nom_du_lieu = $stmt_nom_lieu->fetchColumn() ?: "Lieu inconnu";
+    $post_action = $_POST['action'] ?? '';
 
     try {
-        if ($action === 'edit_stock') {
-            $stock_id = (int) $_POST['stock_id'];
-            $qty = (int) $_POST['quantite'];
-            $date_p = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
+        // --- A. SUPPRIMER UN DPS ---
+        if ($post_action === 'delete_event') {
+            $event_id = (int) $_POST['event_id'];
 
-            $stmt_mat_nom = $pdo->prepare("SELECT m.nom FROM materiels m JOIN stocks s ON m.id = s.materiel_id WHERE s.id = ?");
-            $stmt_mat_nom->execute([$stock_id]);
-            $nom_mat_edit = $stmt_mat_nom->fetchColumn() ?: "Objet";
+            // On récupère le nom pour l'historique
+            $nom_event = $pdo->query("SELECT nom FROM evenements WHERE id = $event_id")->fetchColumn();
 
-            if ($qty <= 0) {
-                $pdo->prepare("DELETE FROM stocks WHERE id = :id")->execute(['id' => $stock_id]);
-                $action_texte = "A retiré l'objet '" . $nom_mat_edit . "' du lieu : " . $nom_du_lieu;
-                $_SESSION['flash_success'] = "✅ Objet retiré du stockage.";
-            } else {
-                $pdo->prepare("UPDATE stocks SET quantite = :qty, date_peremption = :dp WHERE id = :id")->execute(['qty' => $qty, 'dp' => $date_p, 'id' => $stock_id]);
-                $action_texte = "A mis à jour la quantité de '" . $nom_mat_edit . "' (Lieu : " . $nom_du_lieu . ")";
-                $_SESSION['flash_success'] = "✅ Quantité mise à jour.";
-            }
-            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+            // Suppression en cascade (l'événement et ses liaisons de sacs)
+            $pdo->prepare("DELETE FROM evenements WHERE id = ?")->execute([$event_id]);
+            $pdo->prepare("DELETE FROM evenements_lieux WHERE evenement_id = ?")->execute([$event_id]);
 
-        } elseif ($action === 'delete_stock') {
-            $stock_id = (int) $_POST['stock_id'];
-            $stmt_mat_nom = $pdo->prepare("SELECT m.nom FROM materiels m JOIN stocks s ON m.id = s.materiel_id WHERE s.id = ?");
-            $stmt_mat_nom->execute([$stock_id]);
-            $nom_mat_del = $stmt_mat_nom->fetchColumn() ?: "Objet";
+            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")
+                ->execute([$_SESSION['username'], "A supprimé le DPS : $nom_event"]);
 
-            $pdo->prepare("DELETE FROM stocks WHERE id = :id")->execute(['id' => $stock_id]);
+            $_SESSION['flash_success'] = "🗑️ Le DPS a été supprimé.";
+        }
 
-            $action_texte = "A supprimé définitivement '" . $nom_mat_del . "' (Lieu : " . $nom_du_lieu . ")";
-            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+        // --- B. CRÉER UN DPS ---
+        elseif ($post_action === 'create_event') {
+            $nom_event = trim($_POST['nom_evenement']);
+            $date_event = $_POST['date_evenement'];
+            $sacs_selectionnes = $_POST['lieux'] ?? [];
 
-            $_SESSION['flash_success'] = "🗑️ L'objet a été retiré du sac.";
+            if (!empty($nom_event) && !empty($date_event) && !empty($sacs_selectionnes)) {
+                $stmt = $pdo->prepare("INSERT INTO evenements (nom, date_evenement, statut, cree_le) VALUES (?, ?, 'a_verifier', datetime('now', 'localtime'))");
+                $stmt->execute([$nom_event, $date_event]);
+                $event_id = $pdo->lastInsertId();
 
-        } elseif ($action === 'add_stock') {
-            $materiel_id = (int) $_POST['materiel_id'];
-            $quantite = (int) $_POST['quantite'];
-            $date_peremption = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
-            if ($materiel_id && $quantite > 0) {
-                $stmt_check = $pdo->prepare("SELECT id, quantite FROM stocks WHERE materiel_id = :mat AND lieu_id = :lieu AND IFNULL(date_peremption, '') = IFNULL(:peremp, '')");
-                $stmt_check->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'peremp' => $date_peremption]);
-                $stock_existant = $stmt_check->fetch();
-                if ($stock_existant) {
-                    $pdo->prepare("UPDATE stocks SET quantite = :qty WHERE id = :id")->execute(['qty' => $stock_existant['quantite'] + $quantite, 'id' => $stock_existant['id']]);
-                } else {
-                    $pdo->prepare("INSERT INTO stocks (materiel_id, lieu_id, quantite, date_peremption) VALUES (:mat, :lieu, :qty, :peremp)")->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'qty' => $quantite, 'peremp' => $date_peremption]);
+                $stmt_liaison = $pdo->prepare("INSERT INTO evenements_lieux (evenement_id, lieu_id, statut) VALUES (?, ?, 'en_attente')");
+                foreach ($sacs_selectionnes as $lieu_id) {
+                    $stmt_liaison->execute([$event_id, $lieu_id]);
                 }
-
-                $stmt_nom = $pdo->prepare("SELECT nom FROM materiels WHERE id = ?");
-                $stmt_nom->execute([$materiel_id]);
-                $nom_mat = $stmt_nom->fetchColumn() ?: "Objet inconnu";
-
-                $action_texte = "A ajouté $quantite x $nom_mat dans : $nom_du_lieu";
-                $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
-
-                $_SESSION['flash_success'] = "➕ Matériel inséré avec succès.";
+                $_SESSION['flash_success'] = "✅ Le DPS '$nom_event' a été créé.";
+            } else {
+                $_SESSION['flash_error'] = "⚠️ Veuillez remplir tous les champs et sélectionner au moins un sac.";
             }
         }
-        header("Location: remplissage.php?lieu_id=" . $lieu_id);
-        exit;
+
+        // --- C. MODIFIER UN DPS ---
+        elseif ($post_action === 'edit_event') {
+            $event_id = (int) $_POST['event_id'];
+            $nom_event = trim($_POST['nom_evenement']);
+            $date_event = $_POST['date_evenement'];
+            $sacs_selectionnes = $_POST['lieux'] ?? [];
+
+            if (!empty($nom_event) && !empty($date_event) && !empty($sacs_selectionnes)) {
+                // 1. Mise à jour des infos de base
+                $pdo->prepare("UPDATE evenements SET nom = ?, date_evenement = ? WHERE id = ?")->execute([$nom_event, $date_event, $event_id]);
+
+                // 2. Mise à jour des sacs
+                $stmt_existants = $pdo->prepare("SELECT lieu_id FROM evenements_lieux WHERE evenement_id = ?");
+                $stmt_existants->execute([$event_id]);
+                $sacs_existants = $stmt_existants->fetchAll(PDO::FETCH_COLUMN);
+
+                $sacs_a_ajouter = array_diff($sacs_selectionnes, $sacs_existants);
+                $sacs_a_retirer = array_diff($sacs_existants, $sacs_selectionnes);
+
+                // Retirer les sacs décochés
+                if (!empty($sacs_a_retirer)) {
+                    $placeholders = implode(',', array_fill(0, count($sacs_a_retirer), '?'));
+                    $stmt_del = $pdo->prepare("DELETE FROM evenements_lieux WHERE evenement_id = ? AND lieu_id IN ($placeholders)");
+                    $stmt_del->execute(array_merge([$event_id], $sacs_a_retirer));
+                }
+
+                // Ajouter les nouveaux sacs cochés
+                if (!empty($sacs_a_ajouter)) {
+                    $stmt_add = $pdo->prepare("INSERT INTO evenements_lieux (evenement_id, lieu_id, statut) VALUES (?, ?, 'en_attente')");
+                    foreach ($sacs_a_ajouter as $l_id) {
+                        $stmt_add->execute([$event_id, $l_id]);
+                    }
+                }
+
+                $_SESSION['flash_success'] = "✏️ Le DPS a été mis à jour.";
+            } else {
+                $_SESSION['flash_error'] = "⚠️ La modification a échoué : des champs étaient vides.";
+            }
+        }
+
     } catch (PDOException $e) {
-        $_SESSION['flash_error'] = "❌ Erreur : " . $e->getMessage();
-        header("Location: remplissage.php?lieu_id=" . $lieu_id);
-        exit;
+        $_SESSION['flash_error'] = "❌ Erreur base de données : " . $e->getMessage();
     }
+
+    header("Location: remplissage.php");
+    exit;
 }
 
-if ($lieu_id === 0) {
-    // ... SUITE DU CODE HTML (Aucun changement à faire)
-    require_once 'includes/header.php';
-    $lieux = $pdo->query("SELECT * FROM lieux_stockage ORDER BY type, nom")->fetchAll();
+require_once 'includes/header.php';
+
+// ==========================================
+// VUE : TABLEAU DE BORD (Liste des événements)
+// ==========================================
+if ($action === 'dashboard') {
+    $tous_les_sacs = $pdo->query("SELECT id, nom, icone FROM lieux_stockage WHERE type IN ('sac_inter', 'sac_log') ORDER BY nom")->fetchAll();
+    $evenements = $pdo->query("SELECT * FROM evenements ORDER BY date_evenement ASC")->fetchAll();
     ?>
+
+    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+
+        <?php if ($est_admin): ?>
+            <div class="white-box" style="flex: 1; min-width: 300px; height: fit-content;">
+                <h2 id="form_titre"
+                    style="margin-top: 0; color: #d32f2f; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">🚑 Planifier
+                    un DPS</h2>
+                <form action="remplissage.php" method="POST" id="form_dps">
+                    <input type="hidden" name="action" value="create_event" id="form_action">
+                    <input type="hidden" name="event_id" value="" id="form_event_id">
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; font-weight: bold; font-size: 14px; margin-bottom: 5px;">Nom de
+                            l'événement</label>
+                        <input type="text" name="nom_evenement" id="input_nom" required placeholder="Ex: DPS Intégration UTC"
+                            class="input-field">
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; font-weight: bold; font-size: 14px; margin-bottom: 5px;">Date du
+                            poste</label>
+                        <input type="date" name="date_evenement" id="input_date" required class="input-field">
+                    </div>
+
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; font-weight: bold; font-size: 14px; margin-bottom: 5px;">Sacs à préparer
+                            (Cocher)</label>
+                        <div
+                            style="background: #f4f7f6; padding: 10px; border-radius: 4px; border: 1px solid #ccc; max-height: 200px; overflow-y: auto;">
+                            <?php foreach ($tous_les_sacs as $sac): ?>
+                                <label style="display: block; padding: 5px 0; cursor: pointer; border-bottom: 1px solid #eee;">
+                                    <input type="checkbox" name="lieux[]" class="checkbox-sac" value="<?php echo $sac['id']; ?>">
+                                    <?php echo ($sac['icone'] ?: '🎒') . ' ' . htmlspecialchars($sac['nom']); ?>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 10px;">
+                        <button type="submit" id="btn_submit"
+                            style="flex: 2; padding: 12px; background-color: #d32f2f; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Créer
+                            la fiche</button>
+                        <button type="button" id="btn_cancel" onclick="annulerEdition()"
+                            style="flex: 1; padding: 12px; background-color: #ccc; color: #333; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; display: none;">Annuler</button>
+                    </div>
+                </form>
+            </div>
+        <?php endif; ?>
+
+        <div class="white-box" style="flex: 2; min-width: 400px;">
+            <h2 style="margin-top: 0; color: #2c3e50; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">📋 DPS et
+                Vérifications</h2>
+
+            <?php if (empty($evenements)): ?>
+                <p style="text-align: center; color: #999; font-style: italic; padding: 20px;">Aucun événement programmé pour le
+                    moment.</p>
+            <?php else: ?>
+                <div style="display: flex; flex-direction: column; gap: 15px;">
+                    <?php foreach ($evenements as $ev):
+                        // Progression
+                        $stmt_progression = $pdo->prepare("SELECT COUNT(*) as total, SUM(CASE WHEN statut = 'valide' THEN 1 ELSE 0 END) as valides FROM evenements_lieux WHERE evenement_id = ?");
+                        $stmt_progression->execute([$ev['id']]);
+                        $prog = $stmt_progression->fetch();
+
+                        $total = $prog['total'];
+                        $valides = $prog['valides'] ?: 0;
+                        $est_termine = ($total > 0 && $total == $valides);
+
+                        $couleur_bordure = $est_termine ? '#4caf50' : '#f39c12';
+                        $statut_texte = $est_termine ? '✅ Vérification effectuée' : '⏳ Vérification à effectuer';
+
+                        // Sacs liés pour l'édition
+                        $stmt_ids_sacs = $pdo->prepare("SELECT lieu_id FROM evenements_lieux WHERE evenement_id = ?");
+                        $stmt_ids_sacs->execute([$ev['id']]);
+                        $sacs_json = json_encode($stmt_ids_sacs->fetchAll(PDO::FETCH_COLUMN));
+                        ?>
+                        <div
+                            style="border: 1px solid #e0e0e0; border-left: 5px solid <?php echo $couleur_bordure; ?>; border-radius: 6px; padding: 15px; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                            <div
+                                style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+                                <div>
+                                    <h3 style="margin: 0; color: #333; font-size: 18px;"><?php echo htmlspecialchars($ev['nom']); ?>
+                                    </h3>
+                                    <div style="font-size: 13px; color: #666; margin-top: 5px;">Prévu pour le :
+                                        <strong><?php echo date('d/m/Y', strtotime($ev['date_evenement'])); ?></strong></div>
+                                </div>
+                                <div style="text-align: right;">
+                                    <div style="font-size: 12px; font-weight: bold; color: <?php echo $couleur_bordure; ?>;">
+                                        <?php echo $statut_texte; ?></div>
+                                    <div style="font-size: 14px; font-weight: bold; color: #333; margin-top: 5px;">
+                                        <?php echo $valides; ?> / <?php echo $total; ?> sacs prêts</div>
+                                </div>
+                            </div>
+
+                            <div
+                                style="border-top: 1px solid #eee; padding-top: 10px; display: flex; justify-content: space-between; align-items: center;">
+
+                                <div style="display: flex; gap: 10px;">
+                                    <?php if ($est_admin): ?>
+                                        <button type="button"
+                                            onclick='editerDPS(<?php echo $ev['id']; ?>, <?php echo json_encode(htmlspecialchars($ev['nom'])); ?>, "<?php echo $ev['date_evenement']; ?>", <?php echo $sacs_json; ?>)'
+                                            style="background: none; border: 1px solid #ccc; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight:bold; color: #333;">✏️
+                                            Modifier</button>
+
+                                        <form method="POST" style="margin: 0;"
+                                            onsubmit="return confirm('Supprimer définitivement ce DPS ? Toutes les données de vérification associées seront perdues.');">
+                                            <input type="hidden" name="action" value="delete_event">
+                                            <input type="hidden" name="event_id" value="<?php echo $ev['id']; ?>">
+                                            <button type="submit"
+                                                style="background: none; border: 1px solid #ffcdd2; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight:bold; color: #c62828;">🗑️
+                                                Supprimer</button>
+                                        </form>
+                                    <?php endif; ?>
+                                </div>
+
+                                <?php if ($peut_editer): ?>
+                                    <div style="text-align: right;">
+                                        <a href="remplissage.php?action=view_event&id=<?php echo $ev['id']; ?>" class="carte-animee"
+                                            style="display: inline-block; background-color: #2c3e50; color: white; text-decoration: none; padding: 8px 15px; border-radius: 4px; font-size: 13px; font-weight: bold;">Ouvrir
+                                            la fiche ➡️</a>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <?php if ($est_admin): ?>
+        <script>
+            // Fonction pour transformer le formulaire de création en formulaire d'édition
+            function editerDPS(id, nom, date, sacs) {
+                document.getElementById('form_titre').innerText = '✏️ Modifier le DPS';
+                document.getElementById('form_action').value = 'edit_event';
+                document.getElementById('form_event_id').value = id;
+
+                document.getElementById('input_nom').value = nom;
+                document.getElementById('input_date').value = date;
+
+                // On décoche tout, puis on coche les sacs concernés
+                document.querySelectorAll('.checkbox-sac').forEach(cb => {
+                    cb.checked = sacs.includes(parseInt(cb.value));
+                });
+
+                document.getElementById('btn_submit').innerText = 'Enregistrer les modifications';
+                document.getElementById('btn_submit').style.backgroundColor = '#ef6c00'; // Orange
+                document.getElementById('btn_cancel').style.display = 'block';
+
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+
+            // Fonction pour annuler l'édition et repasser en mode création
+            function annulerEdition() {
+                document.getElementById('form_titre').innerText = '🚑 Planifier un DPS';
+                document.getElementById('form_action').value = 'create_event';
+                document.getElementById('form_event_id').value = '';
+
+                document.getElementById('form_dps').reset();
+
+                document.getElementById('btn_submit').innerText = 'Créer la fiche';
+                document.getElementById('btn_submit').style.backgroundColor = '#d32f2f'; // Rouge
+                document.getElementById('btn_cancel').style.display = 'none';
+            }
+        </script>
+    <?php endif; ?>
+
+    <?php
+}
+
+// ==========================================
+// VUE : DÉTAIL D'UN ÉVÉNEMENT (Choix du sac)
+// ==========================================
+elseif ($action === 'view_event' && isset($_GET['id'])) {
+    $event_id = (int) $_GET['id'];
+    $stmt_ev = $pdo->prepare("SELECT * FROM evenements WHERE id = ?");
+    $stmt_ev->execute([$event_id]);
+    $evenement = $stmt_ev->fetch();
+
+    if (!$evenement)
+        die("Événement introuvable.");
+
+    // Récupérer les sacs liés
+    $stmt_sacs = $pdo->prepare("SELECT l.id, l.nom, l.icone, el.statut FROM evenements_lieux el JOIN lieux_stockage l ON el.lieu_id = l.id WHERE el.evenement_id = ?");
+    $stmt_sacs->execute([$event_id]);
+    $sacs_lies = $stmt_sacs->fetchAll();
+    ?>
+
     <div class="white-box">
-        <h2 style="margin-top: 0; color: #d32f2f; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">🔄 Mode
-            Remplissage</h2>
-        <p style="color: #666; margin-bottom: 20px;">Sélectionne le stockage que tu souhaites consulter ou modifier :</p>
+        <a href="remplissage.php" style="color: #666; text-decoration: none; font-size: 14px;">⬅ Retour aux événements</a>
+        <h2 style="margin: 10px 0 0 0; color: #2c3e50;">Préparation : <?php echo htmlspecialchars($evenement['nom']); ?>
+        </h2>
+        <p style="color: #666; margin-bottom: 20px;">Sélectionne un sac pour commencer sa vérification. Les éléments
+            périmant avant le <strong><?php echo date('d/m/Y', strtotime($evenement['date_evenement'])); ?></strong> seront
+            signalés en rouge.</p>
+
         <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-            <?php foreach ($lieux as $lieu):
-                $type_affichage = ($lieu['type'] === 'reserve') ? 'Réserve' : (($lieu['type'] === 'sac_inter') ? 'Sac Intervention' : 'Sac Logistique');
-                $icone = !empty($lieu['icone']) ? $lieu['icone'] : ($lieu['type'] === 'reserve' ? '🏢' : '🎒');
+            <?php foreach ($sacs_lies as $sac):
+                $est_valide = ($sac['statut'] === 'valide');
                 ?>
-                <a href="remplissage.php?lieu_id=<?php echo $lieu['id']; ?>" class="carte-animee"
-                    style="display: block; width: 200px; padding: 20px; background-color: white; border-radius: 8px; border: 1px solid transparent; text-decoration: none; color: #333; text-align: center;">
-                    <div style="font-size: 40px; margin-bottom: 10px;"><?php echo htmlspecialchars($icone); ?></div>
-                    <strong style="font-size: 16px; display: block;"><?php echo htmlspecialchars($lieu['nom']); ?></strong>
-                    <span style="font-size: 12px; color: #999; text-transform: uppercase;"><?php echo $type_affichage; ?></span>
+                <a href="verification_sac.php?event_id=<?php echo $event_id; ?>&lieu_id=<?php echo $sac['id']; ?>"
+                    class="carte-animee"
+                    style="display: block; width: 200px; padding: 20px; background-color: <?php echo $est_valide ? '#e8f5e9' : 'white'; ?>; border: 2px solid <?php echo $est_valide ? '#4caf50' : '#ddd'; ?>; border-radius: 8px; text-decoration: none; color: #333; text-align: center; opacity: <?php echo $est_valide ? '0.8' : '1'; ?>;">
+                    <div style="font-size: 40px; margin-bottom: 10px;">
+                        <?php echo $est_valide ? '✅' : ($sac['icone'] ?: '🎒'); ?></div>
+                    <strong
+                        style="font-size: 16px; display: block; <?php echo $est_valide ? 'text-decoration: line-through;' : ''; ?>"><?php echo htmlspecialchars($sac['nom']); ?></strong>
+                    <span
+                        style="font-size: 12px; font-weight: bold; color: <?php echo $est_valide ? '#2e7d32' : '#d32f2f'; ?>; margin-top: 10px; display: block;">
+                        <?php echo $est_valide ? 'Sac prêt et scellé' : '👉 Vérifier ce sac'; ?>
+                    </span>
                 </a>
             <?php endforeach; ?>
         </div>
     </div>
+
     <?php
-    require_once 'includes/footer.php';
-    exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!$peut_editer)
-        die("🛑 Action bloquée : Vous n'avez pas les droits de modification.");
-    $action = $_POST['action'] ?? '';
-
-    // --- PREPARATION DE L'HISTORIQUE : On récupère le nom du lieu ---
-    $stmt_nom_lieu = $pdo->prepare("SELECT nom FROM lieux_stockage WHERE id = ?");
-    $stmt_nom_lieu->execute([$lieu_id]);
-    $nom_du_lieu = $stmt_nom_lieu->fetchColumn() ?: "Lieu inconnu";
-
-    try {
-        if ($action === 'edit_stock') {
-            $stock_id = (int) $_POST['stock_id'];
-            $qty = (int) $_POST['quantite'];
-            $date_p = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
-
-            // Pour l'historique : on cherche le nom de l'objet qu'on est en train de modifier
-            $stmt_mat_nom = $pdo->prepare("SELECT m.nom FROM materiels m JOIN stocks s ON m.id = s.materiel_id WHERE s.id = ?");
-            $stmt_mat_nom->execute([$stock_id]);
-            $nom_mat_edit = $stmt_mat_nom->fetchColumn() ?: "Objet";
-
-            if ($qty <= 0) {
-                $pdo->prepare("DELETE FROM stocks WHERE id = :id")->execute(['id' => $stock_id]);
-                $action_texte = "A retiré l'objet '" . $nom_mat_edit . "' du lieu : " . $nom_du_lieu;
-            } else {
-                $pdo->prepare("UPDATE stocks SET quantite = :qty, date_peremption = :dp WHERE id = :id")->execute(['qty' => $qty, 'dp' => $date_p, 'id' => $stock_id]);
-                $action_texte = "A mis à jour la quantité de '" . $nom_mat_edit . "' (Lieu : " . $nom_du_lieu . ")";
-            }
-
-            // --- ENREGISTREMENT HISTORIQUE ---
-            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
-
-        } elseif ($action === 'delete_stock') {
-            $stock_id = (int) $_POST['stock_id'];
-
-            // Pour l'historique : on cherche le nom avant de le supprimer
-            $stmt_mat_nom = $pdo->prepare("SELECT m.nom FROM materiels m JOIN stocks s ON m.id = s.materiel_id WHERE s.id = ?");
-            $stmt_mat_nom->execute([$stock_id]);
-            $nom_mat_del = $stmt_mat_nom->fetchColumn() ?: "Objet";
-
-            $pdo->prepare("DELETE FROM stocks WHERE id = :id")->execute(['id' => $stock_id]);
-
-            // --- ENREGISTREMENT HISTORIQUE ---
-            $action_texte = "A supprimé définitivement '" . $nom_mat_del . "' (Lieu : " . $nom_du_lieu . ")";
-            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
-
-        } elseif ($action === 'add_stock') {
-            $materiel_id = (int) $_POST['materiel_id'];
-            $quantite = (int) $_POST['quantite'];
-            $date_peremption = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
-            if ($materiel_id && $quantite > 0) {
-                $stmt_check = $pdo->prepare("SELECT id, quantite FROM stocks WHERE materiel_id = :mat AND lieu_id = :lieu AND IFNULL(date_peremption, '') = IFNULL(:peremp, '')");
-                $stmt_check->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'peremp' => $date_peremption]);
-                $stock_existant = $stmt_check->fetch();
-                if ($stock_existant) {
-                    $pdo->prepare("UPDATE stocks SET quantite = :qty WHERE id = :id")->execute(['qty' => $stock_existant['quantite'] + $quantite, 'id' => $stock_existant['id']]);
-                } else {
-                    $pdo->prepare("INSERT INTO stocks (materiel_id, lieu_id, quantite, date_peremption) VALUES (:mat, :lieu, :qty, :peremp)")->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'qty' => $quantite, 'peremp' => $date_peremption]);
-                }
-
-                // --- ENREGISTREMENT HISTORIQUE ---
-                $stmt_nom = $pdo->prepare("SELECT nom FROM materiels WHERE id = ?");
-                $stmt_nom->execute([$materiel_id]);
-                $nom_mat = $stmt_nom->fetchColumn() ?: "Objet inconnu";
-
-                $action_texte = "A ajouté $quantite x $nom_mat dans : $nom_du_lieu";
-                $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
-            }
-        }
-        header("Location: remplissage.php?lieu_id=" . $lieu_id);
-        exit;
-    } catch (PDOException $e) {
-        die("Erreur : " . $e->getMessage());
-    }
-}
-
-$stmt_lieu = $pdo->prepare("SELECT * FROM lieux_stockage WHERE id = :id");
-$stmt_lieu->execute(['id' => $lieu_id]);
-$lieu = $stmt_lieu->fetch();
-
-if (!$lieu) {
-    header('Location: lieux.php');
-    exit;
-}
-
-$materiels = $pdo->query("SELECT id, nom FROM materiels ORDER BY nom")->fetchAll();
-$stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.quantite, s.date_peremption, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom, s.date_peremption");
-$stmt_stocks->execute(['lieu_id' => $lieu_id]);
-$stocks = $stmt_stocks->fetchAll();
-
-$stocks_par_categorie = [];
-foreach ($stocks as $stock) {
-    $stocks_par_categorie[$stock['categorie_nom']][] = $stock;
-}
-$icone_affichage = !empty($lieu['icone']) ? $lieu['icone'] : '📦';
-
-require_once 'includes/header.php';
+require_once 'includes/footer.php';
 ?>
-
-<div class="white-box">
-
-    <div
-        style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f0f0f0; padding-bottom: 15px; margin-bottom: 20px;">
-        <div>
-            <a href="remplissage.php" style="color: #666; text-decoration: none; font-size: 14px;">⬅ Changer de
-                stockage</a>
-            <h2 style="margin: 10px 0 0 0; color: #d32f2f;">
-                <?php echo $icone_affichage; ?> Remplissage : <?php echo htmlspecialchars($lieu['nom']); ?>
-            </h2>
-        </div>
-    </div>
-
-    <?php if ($peut_editer): ?>
-        <div class="form-container">
-            <h3 style="margin-top: 0; font-size: 16px; color: #2c3e50;">➕ Ajouter un nouveau matériel</h3>
-            <form action="remplissage.php?lieu_id=<?php echo $lieu_id; ?>" method="POST" class="form-group-inline">
-                <input type="hidden" name="action" value="add_stock">
-                <div style="flex: 2; min-width: 200px;">
-                    <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">Catalogue</label>
-                    <select name="materiel_id" required class="input-field">
-                        <option value="">-- Sélectionner --</option>
-                        <?php foreach ($materiels as $mat): ?>
-                            <option value="<?php echo $mat['id']; ?>"><?php echo htmlspecialchars($mat['nom']); ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div style="flex: 1; min-width: 100px;">
-                    <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">Quantité</label>
-                    <input type="number" name="quantite" required min="1" value="1" class="input-field">
-                </div>
-                <div style="flex: 1; min-width: 150px;">
-                    <label
-                        style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">Péremption</label>
-                    <input type="date" name="date_peremption" class="input-field">
-                </div>
-                <div>
-                    <button type="submit"
-                        style="padding: 11px 20px; background-color: #d32f2f; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Insérer</button>
-                </div>
-            </form>
-        </div>
-    <?php endif; ?>
-
-    <div class="form-container"
-        style="background: #fff; border: 1px solid #e0e0e0; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-        <strong style="color: #333;">🔍 Filtrer l'inventaire :</strong>
-        <input type="text" id="searchBar" onkeyup="filtrerInventaire()" placeholder="Rechercher un matériel..."
-            class="input-field" style="flex: 1; min-width: 150px;">
-        <select id="catFilter" onchange="filtrerInventaire()" class="input-field"
-            style="min-width: 150px; flex: initial;">
-            <option value="">Toutes les catégories</option>
-            <?php foreach (array_keys($stocks_par_categorie) as $cat_nom): ?>
-                <option value="<?php echo htmlspecialchars($cat_nom); ?>"><?php echo htmlspecialchars($cat_nom); ?></option>
-            <?php endforeach; ?>
-        </select>
-        <label
-            style="display: flex; align-items: center; gap: 5px; cursor: pointer; color: #d32f2f; font-weight: bold;">
-            <input type="checkbox" id="expFilter" onchange="filtrerInventaire()"> ⚠️ Périme bientôt
-        </label>
-    </div>
-
-    <h3 style="color: #333; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">📦 Inventaire actuel</h3>
-
-    <?php if (empty($stocks_par_categorie)): ?>
-        <p style="text-align: center; color: #999; font-style: italic;">Le stockage est vide.</p>
-    <?php else: ?>
-        <?php foreach ($stocks_par_categorie as $categorie => $articles): ?>
-            <div class="category-block" data-cat="<?php echo htmlspecialchars($categorie); ?>"
-                style="margin-bottom: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
-                <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
-                <h4 class="category-header"
-                    style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                    <?php echo htmlspecialchars($categorie); ?>
-                </h4>
-
-                <table class="table-manager">
-                    <thead>
-                        <tr>
-                            <th style="width: <?php echo $peut_editer ? '40%' : '60%'; ?>;">NOM DU MATÉRIEL</th>
-                            <th style="text-align: center; width: 25%;">PÉREMPTION</th>
-                            <th style="text-align: center; width: 15%;">QUANTITÉ</th>
-                            <?php if ($peut_editer): ?>
-                                <th style="text-align: center; width: 20%;">ACTIONS</th><?php endif; ?>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($articles as $article):
-                            $sid = $article['stock_id'];
-                            $raw_date = $article['date_peremption'];
-                            $affichage_date = $raw_date ? date('d/m/Y', strtotime($raw_date)) : '-';
-                            ?>
-                            <?php if ($peut_editer): ?>
-                                <form id="form-edit-<?php echo $sid; ?>" method="POST"
-                                    action="remplissage.php?lieu_id=<?php echo $lieu_id; ?>">
-                                    <input type="hidden" name="action" value="edit_stock"><input type="hidden" name="stock_id"
-                                        value="<?php echo $sid; ?>">
-                                </form>
-                            <?php endif; ?>
-
-                            <tr class="item-row" data-nom="<?php echo htmlspecialchars(strtolower($article['materiel_nom'])); ?>"
-                                data-peremp="<?php echo $raw_date; ?>" style="transition: background 0.2s;">
-                                <td style="font-weight: 500; color: #444;">
-                                    <?php echo htmlspecialchars($article['materiel_nom']); ?>
-                                </td>
-
-                                <td style="text-align: center; color: #666;">
-                                    <span class="view-mode-<?php echo $sid; ?>"><?php echo $affichage_date; ?></span>
-                                    <?php if ($peut_editer): ?><input class="edit-mode-<?php echo $sid; ?> input-field" type="date"
-                                            form="form-edit-<?php echo $sid; ?>" name="date_peremption" value="<?php echo $raw_date; ?>"
-                                            style="display:none; padding: 5px;"><?php endif; ?>
-                                </td>
-
-                                <td style="text-align: center; font-size: 16px;">
-                                    <span class="view-mode-<?php echo $sid; ?>"
-                                        style="font-weight: bold;"><?php echo $article['quantite']; ?></span>
-                                    <?php if ($peut_editer): ?><input class="edit-mode-<?php echo $sid; ?> input-field"
-                                            type="number" form="form-edit-<?php echo $sid; ?>" name="quantite"
-                                            value="<?php echo $article['quantite']; ?>" min="0"
-                                            style="display:none; width: 60px; padding: 5px; text-align: center; margin: 0 auto;"><?php endif; ?>
-                                </td>
-
-                                <?php if ($peut_editer): ?>
-                                    <td style="text-align: center;">
-                                        <div class="view-mode-<?php echo $sid; ?>"
-                                            style="display: flex; justify-content: center; gap: 10px;">
-                                            <button type="button" onclick="toggleEdit(<?php echo $sid; ?>, true)"
-                                                style="background: transparent; border: none; cursor: pointer; font-size: 16px;"
-                                                title="Modifier">✏️</button>
-                                            <form method="POST" style="margin: 0;"
-                                                onsubmit="return confirm('Retirer définitivement cet objet du sac ?');">
-                                                <input type="hidden" name="action" value="delete_stock">
-                                                <input type="hidden" name="stock_id" value="<?php echo $sid; ?>">
-                                                <button type="submit"
-                                                    style="background: transparent; border: none; cursor: pointer; font-size: 16px; color: #999;"
-                                                    title="Supprimer">🗑️</button>
-                                            </form>
-                                        </div>
-                                        <div class="edit-mode-<?php echo $sid; ?>"
-                                            style="display: none; justify-content: center; gap: 10px;">
-                                            <button type="submit" form="form-edit-<?php echo $sid; ?>"
-                                                style="background: #4caf50; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">💾</button>
-                                            <button type="button" onclick="toggleEdit(<?php echo $sid; ?>, false)"
-                                                style="background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">❌</button>
-                                        </div>
-                                    </td>
-                                <?php endif; ?>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endforeach; ?>
-    <?php endif; ?>
-</div>
-
-<?php if ($peut_editer): ?>
-    <script>
-        function toggleEdit(id, showEdit) {
-            document.querySelectorAll('.view-mode-' + id).forEach(el => el.style.display = showEdit ? 'none' : '');
-            document.querySelectorAll('.edit-mode-' + id).forEach(el => el.style.display = showEdit ? 'inline-block' : 'none');
-        }
-    </script>
-<?php endif; ?>
-
-<script>
-    function filtrerInventaire() {
-        const search = document.getElementById('searchBar').value.toLowerCase();
-        const catFilter = document.getElementById('catFilter').value;
-        const expFilter = document.getElementById('expFilter').checked;
-        const limitDate = new Date();
-        limitDate.setDate(limitDate.getDate() + 30);
-
-        document.querySelectorAll('.category-block').forEach(block => {
-            const blockCat = block.getAttribute('data-cat');
-            let hasVisibleRow = false;
-
-            block.querySelectorAll('.item-row').forEach(row => {
-                const nom = row.getAttribute('data-nom');
-                const peremp = row.getAttribute('data-peremp');
-                let show = true;
-
-                if (search && !nom.includes(search)) show = false;
-                if (catFilter && blockCat !== catFilter) show = false;
-                if (expFilter) {
-                    if (!peremp) show = false;
-                    else {
-                        const pDate = new Date(peremp);
-                        if (pDate > limitDate) show = false;
-                    }
-                }
-                row.style.display = show ? '' : 'none';
-                if (show) hasVisibleRow = true;
-            });
-            block.style.display = hasVisibleRow ? '' : 'none';
-        });
-    }
-</script>
-
-<?php require_once 'includes/footer.php'; ?>
