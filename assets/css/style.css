@@ -244,3 +244,145 @@ body {
         /* Scroll fluide sur iPhone */
     }
 }
+
+/*PAGE DE CONNEXION*/
+
+
+body.login-page {
+    background-color: #f4f7f6;
+    font-family: Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.login-box {
+    background: white;
+    padding: 40px;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+}
+
+.login-box h2 {
+    color: #d32f2f;
+    margin: 0 0 5px 0;
+    text-transform: uppercase;
+    font-size: 22px;
+}
+
+.login-box h3 {
+    color: #555;
+    margin: 0 0 30px 0;
+    font-weight: normal;
+    font-size: 14px;
+}
+
+.btn-oauth {
+    width: 100%;
+    padding: 14px;
+    background-color: #f7c814;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.3s;
+    text-decoration: none;
+    display: inline-block;
+    box-sizing: border-box;
+    margin-bottom: 25px;
+}
+
+.btn-oauth:hover {
+    background-color: #d3ac11;
+}
+
+.separator {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    margin: 20px 0;
+    color: #999;
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.separator::before,
+.separator::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid #ddd;
+}
+
+.separator:not(:empty)::before {
+    margin-right: .25em;
+}
+
+.separator:not(:empty)::after {
+    margin-left: .25em;
+}
+
+.input-field {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+    margin-bottom: 15px;
+}
+
+.btn-local {
+    width: 100%;
+    padding: 10px;
+    background-color: #2c3e50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.btn-local:hover {
+    background-color: #1a252f;
+}
+
+/* Styles pour les messages */
+.error-msg {
+    background: #ffebee;
+    color: #c62828;
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    border: 1px solid #ffcdd2;
+    text-align: left;
+    line-height: 1.5;
+}
+
+.info-msg {
+    background: #e3f2fd;
+    color: #1565c0;
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    border: 1px solid #bbdefb;
+    text-align: left;
+    line-height: 1.5;
+}
+
+.info-msg a {
+    color: #0d47a1;
+    font-weight: bold;
+    text-decoration: underline;
+}
