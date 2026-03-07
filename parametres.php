@@ -22,13 +22,8 @@ try {
     $pdo->exec("CREATE TABLE IF NOT EXISTS types_lieux (id INTEGER PRIMARY KEY AUTOINCREMENT, nom TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS icones_lieux (id INTEGER PRIMARY KEY AUTOINCREMENT, icone TEXT)");
 
-    // NOUVEAU : Ajout du paramètre "est_reserve"
-    $pdo->exec("ALTER TABLE types_lieux ADD COLUMN est_reserve INTEGER DEFAULT 0");
-    // On passe automatiquement l'ancien type "Réserve" en réserve officielle
-    $pdo->exec("UPDATE types_lieux SET est_reserve = 1 WHERE nom LIKE '%éserve%'");
-
     if ($pdo->query("SELECT COUNT(*) FROM types_lieux")->fetchColumn() == 0) {
-        $pdo->exec("INSERT INTO types_lieux (nom, est_reserve) VALUES ('Sac d''intervention', 0), ('Sac logistique', 0), ('Réserve', 1)");
+        $pdo->exec("INSERT INTO types_lieux (nom) VALUES ('Sac d''intervention'), ('Sac logistique'), ('Réserve')");
     }
     if ($pdo->query("SELECT COUNT(*) FROM icones_lieux")->fetchColumn() == 0) {
         $pdo->exec("INSERT INTO icones_lieux (icone) VALUES ('🎒'), ('💼'), ('🏢'), ('🧰'), ('🚑'), ('💊')");
@@ -65,18 +60,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['flash_success'] = "🗑️ Catégorie supprimée.";
             }
         }
-        // --- NOUVEAU : GESTION DES TYPES AVEC CASE À COCHER ---
+
+        // --- GESTION DES TYPES ---
         elseif ($action === 'add_type') {
             $nom = trim($_POST['nom']);
-            $est_reserve = isset($_POST['est_reserve']) ? 1 : 0;
             if (!empty($nom)) {
-                $pdo->prepare("INSERT INTO types_lieux (nom, est_reserve) VALUES (?, ?)")->execute([$nom, $est_reserve]);
+                $pdo->prepare("INSERT INTO types_lieux (nom) VALUES (?)")->execute([$nom]);
                 $_SESSION['flash_success'] = "✅ Nouveau type ajouté.";
+            }
+        } elseif ($action === 'edit_type') { // NOUVEAU : Modification d'un type
+            $id = (int) $_POST['id'];
+            $nom = trim($_POST['nom']);
+            if (!empty($nom) && $id > 0) {
+                $pdo->prepare("UPDATE types_lieux SET nom = ? WHERE id = ?")->execute([$nom, $id]);
+                $_SESSION['flash_success'] = "✏️ Type de stockage mis à jour.";
             }
         } elseif ($action === 'delete_type') {
             $pdo->prepare("DELETE FROM types_lieux WHERE id = ?")->execute([(int) $_POST['id']]);
             $_SESSION['flash_success'] = "🗑️ Type supprimé.";
-        } elseif ($action === 'add_icone') {
+        }
+
+        // --- GESTION DES ICONES ---
+        elseif ($action === 'add_icone') {
             if (!empty($_POST['icone'])) {
                 $pdo->prepare("INSERT INTO icones_lieux (icone) VALUES (?)")->execute([trim($_POST['icone'])]);
                 $_SESSION['flash_success'] = "✅ Icône ajoutée.";
@@ -174,45 +179,54 @@ require_once 'includes/header.php';
             <tbody>
                 <?php foreach ($types_lieux as $type): ?>
                     <tr>
-                        <td style="font-weight: 500; color: #555;">
-                            <?php echo htmlspecialchars($type['nom']); ?>
-                        </td>
-                        <td style="text-align: right;">
-                            <form method="POST" action="parametres.php" style="margin: 0;"
-                                onsubmit="return confirm('Supprimer ce type ?');">
-                                <input type="hidden" name="action" value="delete_type">
-                                <input type="hidden" name="id" value="<?php echo $type['id']; ?>">
-                                <button type="submit"
-                                    style="background: transparent; color: #c62828; border: none; cursor: pointer; font-size: 16px;">🗑️</button>
-                            </form>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
-
-    <div class="white-box" style="margin: 0;">
-        <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px;">🖼️ Icônes
-            disponibles</h3>
-        <form method="POST" action="parametres.php" style="display: flex; gap: 10px; margin-bottom: 15px;">
-            <input type="hidden" name="action" value="add_icone">
-            <input type="text" name="icone" placeholder="Emoji (ex: 🩸)" required class="input-field"
-                style="margin: 0; flex: 1;">
-            <button type="submit"
-                style="background: #2e7d32; color: white; border: none; border-radius: 4px; padding: 0 15px; cursor: pointer; font-weight: bold;">Ajouter</button>
-        </form>
-        <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-            <?php foreach ($icones as $ic): ?>
-                <form method="POST" action="parametres.php" style="margin: 0;" onsubmit="return confirm('Supprimer ?');">
-                    <input type="hidden" name="action" value="delete_icone">
-                    <input type="hidden" name="id" value="<?php echo $ic['id']; ?>">
-                    <button type="submit" title="Cliquez pour supprimer"
-                        style="background: #f4f7f6; border: 1px solid #ccc; border-radius: 8px; font-size: 24px; padding: 10px; cursor: pointer;"><?php echo htmlspecialchars($ic['icone']); ?></button>
-                </form>
-            <?php endforeach; ?>
+                        <form method="POST" action="parametres.php">
+                            <input type="hidden" name="action" value="edit_type">
+                            <input type="hidden" name="id" value="<?php echo $type['id']; ?>">
+                            <td style="font-weight: 500; color: #555; width: 60%;">
+                                <input type="text" name="nom" value="<?php echo htmlspecialchars($type['nom']); ?>" required
+                                    class="input-field" style="margin: 0; padding: 5px;">
+                            </td>
+                            <td style="text-align: right; width: 40%;">
+                                <div style="display: flex; gap: 5px; justify-content: flex-end;">
+                                    <button type="submit"
+                                        style="background: #4caf50; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">💾</button>
+                        </form>
+                        <form method="POST" action="parametres.php" style="margin: 0;"
+                            onsubmit="return confirm('Supprimer ce type ?');">
+                            <input type="hidden" name="action" value="delete_type">
+                            <input type="hidden" name="id" value="<?php echo $type['id']; ?>">
+                            <button type="submit"
+                                style="background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">🗑️</button>
+                        </form>
         </div>
+        </td>
+        </tr>
+    <?php endforeach; ?>
+    </tbody>
+    </table>
+</div>
+
+<div class="white-box" style="margin: 0;">
+    <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px;">🖼️ Icônes
+        disponibles</h3>
+    <form method="POST" action="parametres.php" style="display: flex; gap: 10px; margin-bottom: 15px;">
+        <input type="hidden" name="action" value="add_icone">
+        <input type="text" name="icone" placeholder="Emoji (ex: 🩸)" required class="input-field"
+            style="margin: 0; flex: 1;">
+        <button type="submit"
+            style="background: #2e7d32; color: white; border: none; border-radius: 4px; padding: 0 15px; cursor: pointer; font-weight: bold;">Ajouter</button>
+    </form>
+    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+        <?php foreach ($icones as $ic): ?>
+            <form method="POST" action="parametres.php" style="margin: 0;" onsubmit="return confirm('Supprimer ?');">
+                <input type="hidden" name="action" value="delete_icone">
+                <input type="hidden" name="id" value="<?php echo $ic['id']; ?>">
+                <button type="submit" title="Cliquez pour supprimer"
+                    style="background: #f4f7f6; border: 1px solid #ccc; border-radius: 8px; font-size: 24px; padding: 10px; cursor: pointer;"><?php echo htmlspecialchars($ic['icone']); ?></button>
+            </form>
+        <?php endforeach; ?>
     </div>
+</div>
 </div>
 </div>
 <?php require_once 'includes/footer.php'; ?>

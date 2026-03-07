@@ -50,6 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_verification'
         foreach ($comptages as $stock_id => $data) {
             $counted = (int) $data['counted'];
             $added_qty = (int) ($data['added_qty'] ?? 0);
+            $reserve_stock_id = $data['reserve_stock_id'] ?? '';
             $added_date = !empty($data['added_date']) ? $data['added_date'] : null;
             $mat_id = (int) $data['materiel_id'];
 
@@ -62,27 +63,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_verification'
                 $pdo->prepare("UPDATE stocks SET quantite = ? WHERE id = ?")->execute([$counted, $stock_id]);
             }
 
-            // B. Traitement du nouveau lot rajouté depuis la réserve
-            if ($added_qty > 0) {
-                // On vérifie s'il n'existe pas DÉJÀ un lot avec cette même date exacte pour ce matériel dans ce sac
-                $stmt_check = $pdo->prepare("SELECT id, quantite FROM stocks WHERE materiel_id = ? AND lieu_id = ? AND IFNULL(date_peremption, '') = IFNULL(?, '')");
+            // B. Traitement du nouveau lot rajouté
+            if ($added_qty > 0 && $reserve_stock_id !== 'acquitter') {
+
+                // Si on pioche dans un lot de réserve précis
+                if (is_numeric($reserve_stock_id)) {
+                    $stmt_res = $pdo->prepare("SELECT id, quantite, date_peremption FROM stocks WHERE id = ?");
+                    $stmt_res->execute([$reserve_stock_id]);
+                    $reserve_lot = $stmt_res->fetch();
+
+                    if ($reserve_lot) {
+                        $added_date = $reserve_lot['date_peremption']; // On force la date du lot de réserve
+
+                        // Déduction de la réserve source
+                        if ($reserve_lot['quantite'] <= $added_qty) {
+                            $pdo->prepare("DELETE FROM stocks WHERE id = ?")->execute([$reserve_lot['id']]);
+                        } else {
+                            $pdo->prepare("UPDATE stocks SET quantite = quantite - ? WHERE id = ?")->execute([$added_qty, $reserve_lot['id']]);
+                        }
+                    }
+                }
+
+                // Ajout dans le sac actuel (Fusion si date identique, ou création)
+                $stmt_check = $pdo->prepare("SELECT id FROM stocks WHERE materiel_id = ? AND lieu_id = ? AND IFNULL(date_peremption, '') = IFNULL(?, '')");
                 $stmt_check->execute([$mat_id, $lieu_id, $added_date]);
                 $stock_existant = $stmt_check->fetch();
 
                 if ($stock_existant) {
-                    // Les dates sont identiques : on fusionne pour garder la base propre
                     $pdo->prepare("UPDATE stocks SET quantite = quantite + ? WHERE id = ?")->execute([$added_qty, $stock_existant['id']]);
                 } else {
-                    // La date est différente (ou nouvelle) : on crée une NOUVELLE ligne indépendante !
                     $pdo->prepare("INSERT INTO stocks (materiel_id, lieu_id, quantite, date_peremption) VALUES (?, ?, ?, ?)")
                         ->execute([$mat_id, $lieu_id, $added_qty, $added_date]);
-                }
-                // B. Traitement du nouveau lot rajouté depuis la réserve
-                if ($added_qty > 0) {
-                    // ... (Le code existant qui fait INSERT et UPDATE dans le sac) ...
-
-                    // NOUVEAU : On déduit automatiquement ce qu'on vient de prendre des réserves !
-                    deduireDeLaReserve($pdo, $mat_id, $added_qty);
                 }
             }
         }
@@ -95,7 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_verification'
             ->execute([$_SESSION['username'], "A vérifié et scellé le sac '" . $lieu['nom'] . "' pour le DPS '" . $event['nom'] . "'"]);
 
         $pdo->commit();
-        $_SESSION['flash_success'] = "✅ Le sac a été vérifié, recomplété et scellé avec succès !";
+        $_SESSION['flash_success'] = "✅ Le sac a été vérifié, mis à jour et scellé avec succès !";
         header("Location: remplissage.php?action=view_event&id=" . $event_id);
         exit;
 
@@ -108,7 +119,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_verification'
 // ==========================================
 // 4. RÉCUPÉRATION DES DONNÉES POUR L'AFFICHAGE
 // ==========================================
-// Attention : on récupère aussi le materiel_id (m.id) pour pouvoir créer les nouveaux lots
+
+// A. Récupération du contenu du sac
 $stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.quantite, s.date_peremption, m.id AS materiel_id, m.nom AS materiel_nom, c.nom AS categorie_nom 
                               FROM stocks s 
                               JOIN materiels m ON s.materiel_id = m.id 
@@ -121,6 +133,18 @@ $stocks = $stmt_stocks->fetchAll();
 $stocks_par_categorie = [];
 foreach ($stocks as $s) {
     $stocks_par_categorie[$s['categorie_nom']][] = $s;
+}
+
+// B. Récupération des lots disponibles en Réserve
+$stmt_reserves = $pdo->query("SELECT s.id as reserve_stock_id, s.materiel_id, s.quantite, s.date_peremption, l.nom as lieu_nom 
+                              FROM stocks s 
+                              JOIN lieux_stockage l ON s.lieu_id = l.id 
+                              WHERE l.est_reserve = 1 AND s.quantite > 0 
+                              ORDER BY s.date_peremption ASC");
+$toutes_les_reserves = $stmt_reserves->fetchAll();
+$reserves_par_materiel = [];
+foreach ($toutes_les_reserves as $res) {
+    $reserves_par_materiel[$res['materiel_id']][] = $res;
 }
 
 $date_event_timestamp = strtotime($event['date_evenement']);
@@ -158,12 +182,11 @@ require_once 'includes/header.php';
         style="background: #fff3e0; padding: 15px; border-radius: 8px; border-left: 5px solid #ef6c00; margin-bottom: 25px;">
         <strong>Consignes de vérification :</strong>
         <ul style="margin: 5px 0 0 0; padding-left: 20px; font-size: 14px; color: #555;">
-            <li>Inscrivez dans la case <strong>"Validé"</strong> le nombre d'objets en bon état présents dans le sac.
-            </li>
-            <li>S'il en manque, un menu de remplissage apparaîtra pour indiquer ce que vous rajoutez depuis la réserve.
-            </li>
-            <li>Les objets en <span style="color: #d32f2f; font-weight: bold;">rouge</span> seront périmés le jour du
-                DPS. Leur compte a été mis à 0, merci de les jeter et de les remplacer.</li>
+            <li>S'il manque des objets, vous pourrez choisir de les recompléter depuis une réserve ou d'acquitter
+                l'écart.</li>
+            <li><strong>Sécurité :</strong> Si un objet n'est plus présent (quantité 0) ou s'il sera périmé le jour du
+                DPS, il est <span style="color: #d32f2f; font-weight: bold;">obligatoire</span> de le recompléter.
+                L'acquittement sera bloqué.</li>
         </ul>
     </div>
 
@@ -191,6 +214,7 @@ require_once 'includes/header.php';
                         <?php foreach ($articles as $art):
                             $sid = $art['stock_id'];
                             $theo = $art['quantite'];
+                            $mat_id = $art['materiel_id'];
                             $est_perime = false;
                             $texte_peremption = '-';
 
@@ -202,14 +226,19 @@ require_once 'includes/header.php';
                                 }
                                 $texte_peremption = date('d/m/Y', $date_art_timestamp);
                             }
+
+                            $lots_dispos = $reserves_par_materiel[$mat_id] ?? [];
                             ?>
                             <tr class="item-row" data-stock-id="<?php echo $sid; ?>" data-theo="<?php echo $theo; ?>"
+                                data-nom="<?php echo htmlspecialchars($art['materiel_nom']); ?>"
+                                data-perime="<?php echo $est_perime ? 'true' : 'false'; ?>"
                                 style="border-bottom: 1px solid #eee; <?php echo $est_perime ? 'background-color: #ffebee;' : ''; ?>">
+
                                 <td style="padding: 10px; font-weight: 500; color: #333;">
                                     <?php echo htmlspecialchars($art['materiel_nom']); ?>
                                     <?php if ($est_perime): ?>
                                         <div style="font-size: 11px; color: #d32f2f; font-weight: bold; margin-top: 5px;">⚠️ Périmé le
-                                            jour du poste</div>
+                                            jour du poste (À remplacer)</div>
                                     <?php endif; ?>
                                 </td>
 
@@ -223,31 +252,60 @@ require_once 'includes/header.php';
 
                                 <td style="padding: 10px; text-align: center;">
                                     <input type="number" min="0" name="stock[<?php echo $sid; ?>][counted]" class="input-counted"
-                                        value="<?php echo $est_perime ? 0 : $theo; ?>" oninput="checkDifference(this)"
-                                        style="width: 70px; padding: 8px; font-size: 16px; text-align: center; border: 2px solid #ccc; border-radius: 4px; outline: none;">
+                                        value="<?php echo $est_perime ? 0 : $theo; ?>" oninput="checkDifference(this)" <?php echo $est_perime ? 'readonly' : ''; ?>
+                                        style="width: 70px; padding: 8px; font-size: 16px; text-align: center; border: 2px solid <?php echo $est_perime ? '#f44336' : '#ccc'; ?>; border-radius: 4px; outline: none; <?php echo $est_perime ? 'background-color: #ffcdd2;' : ''; ?>">
                                     <input type="hidden" name="stock[<?php echo $sid; ?>][materiel_id]"
-                                        value="<?php echo $art['materiel_id']; ?>">
+                                        value="<?php echo $mat_id; ?>">
                                 </td>
                             </tr>
 
                             <tr class="refill-row" id="refill-<?php echo $sid; ?>"
-                                style="display: none; background-color: #fdfaf6; border-bottom: 2px solid #ddd;">
+                                style="display: <?php echo $est_perime ? 'table-row' : 'none'; ?>; background-color: #fdfaf6; border-bottom: 2px solid #ddd;">
                                 <td colspan="4" style="padding: 10px 10px 10px 40px; border-left: 4px solid #ef6c00;">
                                     <span style="color: #ef6c00; font-weight: bold; font-size: 14px;">
-                                        ↳ Il manque <span class="missing-display">0</span> unité(s). <span
-                                            style="color:#666;">Remplissage depuis la réserve :</span>
+                                        ↳ Il manque <span class="missing-display"><?php echo $est_perime ? $theo : '0'; ?></span>
+                                        unité(s).
                                     </span>
                                     <div
-                                        style="display: inline-flex; align-items: center; gap: 10px; margin-left: 15px; background: white; padding: 5px 10px; border-radius: 4px; border: 1px solid #ccc;">
-                                        <label style="font-size: 12px; font-weight:bold; color:#333;">Qté ajoutée :</label>
-                                        <input type="number" name="stock[<?php echo $sid; ?>][added_qty]" class="input-added-qty"
-                                            value="0" min="0"
-                                            style="width: 60px; padding: 4px; text-align: center; border: 1px solid #aaa; border-radius: 3px;">
+                                        style="display: flex; align-items: center; gap: 10px; margin-top: 10px; background: white; padding: 10px; border-radius: 4px; border: 1px solid #ccc; flex-wrap: wrap;">
 
-                                        <label style="font-size: 12px; font-weight:bold; color:#333; margin-left: 10px;">Nouv.
-                                            Péremption :</label>
-                                        <input type="date" name="stock[<?php echo $sid; ?>][added_date]" class="input-added-date"
-                                            style="padding: 4px; border: 1px solid #aaa; border-radius: 3px;">
+                                        <label style="font-size: 12px; font-weight:bold; color:#333;">Action :</label>
+                                        <select name="stock[<?php echo $sid; ?>][reserve_stock_id]" class="input-reserve-lot"
+                                            style="padding: 6px; border: 1px solid #aaa; border-radius: 3px; max-width: 350px;"
+                                            onchange="updateMaxQty(this)">
+
+                                            <option value="acquitter" class="opt-acquitter"
+                                                style="<?php echo $est_perime ? 'display:none;' : ''; ?>">✅ Acquitter l'écart
+                                                (Laisser tel quel)</option>
+                                            <option value="" class="opt-separator" <?php echo $est_perime ? 'selected' : 'disabled'; ?>>-- Recompléter avec le lot suivant --</option>
+
+                                            <?php foreach ($lots_dispos as $res):
+                                                $date_format = $res['date_peremption'] ? date('d/m/Y', strtotime($res['date_peremption'])) : 'Aucune';
+                                                $label = htmlspecialchars($res['lieu_nom']) . " | Pér: " . $date_format . " | Dispo: " . $res['quantite'];
+                                                ?>
+                                                <option value="<?php echo $res['reserve_stock_id']; ?>"
+                                                    data-max="<?php echo $res['quantite']; ?>">
+                                                    <?php echo $label; ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                            <option value="manual">Saisie manuelle externe</option>
+                                        </select>
+
+                                        <div class="qty-container"
+                                            style="display: <?php echo $est_perime ? 'flex' : 'none'; ?>; align-items: center; gap: 10px; margin-left: 10px;">
+                                            <label style="font-size: 12px; font-weight:bold; color:#333;">Qté ajoutée :</label>
+                                            <input type="number" name="stock[<?php echo $sid; ?>][added_qty]"
+                                                class="input-added-qty" value="0" min="0" oninput="checkMaxQty(this)"
+                                                style="width: 60px; padding: 6px; text-align: center; border: 1px solid #aaa; border-radius: 3px;">
+                                        </div>
+
+                                        <div class="manual-date-container"
+                                            style="display: none; align-items: center; gap: 10px; margin-left: 10px;">
+                                            <label style="font-size: 12px; font-weight:bold; color:#333;">Nouv. Pér. :</label>
+                                            <input type="date" name="stock[<?php echo $sid; ?>][added_date]"
+                                                class="input-added-date"
+                                                style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
+                                        </div>
                                     </div>
                                 </td>
                             </tr>
@@ -267,66 +325,153 @@ require_once 'includes/header.php';
 </form>
 
 <script>
-    // 1. Fonction appelée à chaque fois qu'on tape dans une case "Validé"
+    // 1. Fonction appelée à chaque fois qu'on modifie le comptage
     function checkDifference(input) {
         const row = input.closest('.item-row');
         const stockId = row.getAttribute('data-stock-id');
         const theo = parseInt(row.getAttribute('data-theo'));
+        const estPerime = row.getAttribute('data-perime') === 'true';
         let counted = parseInt(input.value);
         if (isNaN(counted)) counted = 0;
 
         const refillRow = document.getElementById('refill-' + stockId);
         const missingDisplay = refillRow.querySelector('.missing-display');
-        const addedQtyInput = refillRow.querySelector('.input-added-qty');
+        const selectLot = refillRow.querySelector('.input-reserve-lot');
+        const optAcquitter = refillRow.querySelector('.opt-acquitter');
 
-        // S'il en manque
         if (counted < theo) {
             const missing = theo - counted;
             refillRow.style.display = 'table-row';
             missingDisplay.textContent = missing;
 
-            // On pré-remplit la quantité à rajouter pour faire gagner du temps
-            addedQtyInput.value = missing;
-            input.style.borderColor = '#ef6c00'; // Met la case du haut en orange
-        }
-        // Si le compte est bon (ou supérieur)
-        else {
+            // Règles d'Acquittement
+            if (counted === 0 || estPerime) {
+                optAcquitter.style.display = 'none'; // Interdit d'acquitter un sac vide
+                if (selectLot.value === 'acquitter') {
+                    selectLot.value = ''; // Force à choisir un lot
+                }
+            } else {
+                optAcquitter.style.display = 'block'; // Autorisé
+                if (!selectLot.value) {
+                    selectLot.value = 'acquitter';
+                }
+            }
+
+            input.style.borderColor = '#ef6c00';
+            updateMaxQty(selectLot); // Mets à jour l'interface (cache ou affiche les quantités)
+
+        } else {
             refillRow.style.display = 'none';
-            addedQtyInput.value = 0;
-            input.style.borderColor = '#4caf50'; // Met la case du haut en vert
+            selectLot.value = 'acquitter';
+            refillRow.querySelector('.input-added-qty').value = 0;
+            input.style.borderColor = '#4caf50';
         }
     }
 
-    // 2. Initialisation au chargement de la page (pour faire apparaître les alertes des produits périmés)
+    // 2. Gestion de l'affichage des dates et quantités max
+    function updateMaxQty(selectElement) {
+        const container = selectElement.closest('.refill-row');
+        const qtyContainer = container.querySelector('.qty-container');
+        const manualDateContainer = container.querySelector('.manual-date-container');
+        const addedQtyInput = container.querySelector('.input-added-qty');
+
+        const stockId = container.id.replace('refill-', '');
+        const row = document.querySelector(`.item-row[data-stock-id="${stockId}"]`);
+        const theo = parseInt(row.getAttribute('data-theo'));
+        const counted = parseInt(row.querySelector('.input-counted').value) || 0;
+        const missing = theo - counted;
+
+        if (selectElement.value === 'acquitter') {
+            qtyContainer.style.display = 'none';
+            manualDateContainer.style.display = 'none';
+            addedQtyInput.value = 0;
+        } else if (selectElement.value === 'manual') {
+            qtyContainer.style.display = 'flex';
+            manualDateContainer.style.display = 'flex';
+            addedQtyInput.removeAttribute('max');
+            if (parseInt(addedQtyInput.value) === 0) addedQtyInput.value = missing;
+        } else if (selectElement.value === '') {
+            qtyContainer.style.display = 'none';
+            manualDateContainer.style.display = 'none';
+            addedQtyInput.value = 0;
+        } else {
+            qtyContainer.style.display = 'flex';
+            manualDateContainer.style.display = 'none';
+            const selectedOption = selectElement.options[selectElement.selectedIndex];
+            const max = selectedOption.getAttribute('data-max');
+            addedQtyInput.setAttribute('max', max);
+
+            if (parseInt(addedQtyInput.value) === 0) addedQtyInput.value = missing;
+            if (parseInt(addedQtyInput.value) > parseInt(max)) addedQtyInput.value = max;
+        }
+        selectElement.style.borderColor = '#aaa'; // Enlève l'erreur visuelle
+    }
+
+    function checkMaxQty(inputElement) {
+        const max = inputElement.getAttribute('max');
+        if (max && parseInt(inputElement.value) > parseInt(max)) {
+            inputElement.value = max;
+            alert("Attention : Le lot sélectionné ne contient que " + max + " unités.");
+        }
+    }
+
+    // Initialisation au chargement
     document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.input-counted').forEach(input => {
             checkDifference(input);
         });
     });
 
-    // 3. Validation finale avant envoi
+    // 3. Validation finale avant scellement
     function validerFormulaireVerification() {
         let sousEffectif = false;
         let nbLignesVides = 0;
+        let erreurLotManquant = false;
+        let blocageZero = false;
+        let messageBlocage = "";
 
-        // On vérifie toutes les lignes pour voir s'il y a des manques
         document.querySelectorAll('.item-row').forEach(row => {
             const stockId = row.getAttribute('data-stock-id');
             const theo = parseInt(row.getAttribute('data-theo'));
+            const nomMat = row.getAttribute('data-nom');
+            const estPerime = row.getAttribute('data-perime') === 'true';
             const counted = parseInt(row.querySelector('.input-counted').value) || 0;
 
             const refillRow = document.getElementById('refill-' + stockId);
             const added = parseInt(refillRow.querySelector('.input-added-qty').value) || 0;
+            const selectLot = refillRow.querySelector('.input-reserve-lot');
 
+            // Règle stricte : 0 ou périmé interdit d'être acquitté
+            if (counted === 0 && added === 0) {
+                blocageZero = true;
+                messageBlocage += `- ${nomMat}\n`;
+            }
+
+            // Calcul du sous-effectif assumé
             if ((counted + added) < theo) {
                 sousEffectif = true;
                 nbLignesVides++;
             }
+
+            // Si on recomplète, il faut un lot
+            if (added > 0 && (selectLot.value === "" || selectLot.value === "acquitter")) {
+                erreurLotManquant = true;
+                selectLot.style.borderColor = '#f44336';
+            }
         });
 
-        // Avertissement intelligent
+        if (blocageZero) {
+            alert("⚠️ IMPOSSIBLE DE SCELLER.\nLes matériels suivants sont indispensables (manquants ou périmés) et n'ont pas été remplacés :\n\n" + messageBlocage + "\nVous devez obligatoirement sélectionner un lot pour les recompléter.");
+            return;
+        }
+
+        if (erreurLotManquant) {
+            alert("⚠️ Veuillez choisir un lot de réserve pour le matériel que vous rajoutez (encadré en rouge).");
+            return;
+        }
+
         if (sousEffectif) {
-            if (!confirm(`⚠️ ATTENTION : Le sac n'est pas rempli à son niveau théorique (manque sur ${nbLignesVides} ligne(s)).\n\nÊtes-vous sûr de vouloir sceller un sac incomplet pour ce DPS ?`)) {
+            if (!confirm(`⚠️ ATTENTION : Le sac n'est pas rempli à son niveau théorique (manque assumé sur ${nbLignesVides} ligne(s)).\nLes écarts seront acquittés en base de données.\n\nÊtes-vous sûr de vouloir sceller un sac incomplet pour ce DPS ?`)) {
                 return;
             }
         } else {

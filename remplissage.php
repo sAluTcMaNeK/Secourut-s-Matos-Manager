@@ -116,7 +116,8 @@ require_once 'includes/header.php';
 // VUE : TABLEAU DE BORD (Liste des événements)
 // ==========================================
 if ($action === 'dashboard') {
-    $tous_les_sacs = $pdo->query("SELECT id, nom, icone FROM lieux_stockage WHERE type IN ('sac_inter', 'sac_log') ORDER BY nom")->fetchAll();
+    // CORRECTION : On sélectionne tous les lieux qui ne sont PAS des réserves
+    $tous_les_sacs = $pdo->query("SELECT id, nom, icone FROM lieux_stockage WHERE est_reserve = 0 ORDER BY nom")->fetchAll();
     $evenements = $pdo->query("SELECT * FROM evenements ORDER BY date_evenement ASC")->fetchAll();
     ?>
 
@@ -204,13 +205,16 @@ if ($action === 'dashboard') {
                                     <h3 style="margin: 0; color: #333; font-size: 18px;"><?php echo htmlspecialchars($ev['nom']); ?>
                                     </h3>
                                     <div style="font-size: 13px; color: #666; margin-top: 5px;">Prévu pour le :
-                                        <strong><?php echo date('d/m/Y', strtotime($ev['date_evenement'])); ?></strong></div>
+                                        <strong><?php echo date('d/m/Y', strtotime($ev['date_evenement'])); ?></strong>
+                                    </div>
                                 </div>
                                 <div style="text-align: right;">
                                     <div style="font-size: 12px; font-weight: bold; color: <?php echo $couleur_bordure; ?>;">
-                                        <?php echo $statut_texte; ?></div>
+                                        <?php echo $statut_texte; ?>
+                                    </div>
                                     <div style="font-size: 14px; font-weight: bold; color: #333; margin-top: 5px;">
-                                        <?php echo $valides; ?> / <?php echo $total; ?> sacs prêts</div>
+                                        <?php echo $valides; ?> / <?php echo $total; ?> sacs prêts
+                                    </div>
                                 </div>
                             </div>
 
@@ -325,7 +329,8 @@ elseif ($action === 'view_event' && isset($_GET['id'])) {
                     class="carte-animee"
                     style="display: block; width: 200px; padding: 20px; background-color: <?php echo $est_valide ? '#e8f5e9' : 'white'; ?>; border: 2px solid <?php echo $est_valide ? '#4caf50' : '#ddd'; ?>; border-radius: 8px; text-decoration: none; color: #333; text-align: center; opacity: <?php echo $est_valide ? '0.8' : '1'; ?>;">
                     <div style="font-size: 40px; margin-bottom: 10px;">
-                        <?php echo $est_valide ? '✅' : ($sac['icone'] ?: '🎒'); ?></div>
+                        <?php echo $est_valide ? '✅' : ($sac['icone'] ?: '🎒'); ?>
+                    </div>
                     <strong
                         style="font-size: 16px; display: block; <?php echo $est_valide ? 'text-decoration: line-through;' : ''; ?>"><?php echo htmlspecialchars($sac['nom']); ?></strong>
                     <span

@@ -18,6 +18,16 @@ try {
 } catch (PDOException $e) {
 }
 
+try {
+    $pdo->exec("ALTER TABLE historique_comptages ADD COLUMN action_corrective TEXT");
+} catch (PDOException $e) {
+}
+
+try {
+    $pdo->exec("ALTER TABLE lieux_stockage ADD COLUMN est_reserve INTEGER DEFAULT 0");
+} catch (PDOException $e) {
+}
+
 $stmt_actif = $pdo->query("SELECT * FROM inventaires WHERE statut = 'en_cours' ORDER BY id DESC LIMIT 1");
 $inventaire_actif = $stmt_actif->fetch();
 
@@ -60,32 +70,122 @@ if ($action === 'cloturer' && $inventaire_actif && $peut_editer) {
     exit;
 }
 
+// === SOUMISSION DE L'INVENTAIRE D'UN LIEU ===
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_lieu']) && $inventaire_actif) {
     if (!$peut_editer)
-        die("🛑 Action bloquée : Vous n'avez pas les droits de modification.");
+        die("🛑 Action bloquée.");
+
     $inv_id = $inventaire_actif['id'];
+
+    $stmt_lieu = $pdo->prepare("SELECT est_reserve, nom FROM lieux_stockage WHERE id = ?");
+    $stmt_lieu->execute([$lieu_id]);
+    $lieu_info = $stmt_lieu->fetch();
+    $est_reserve = $lieu_info['est_reserve'] == 1;
+
     if (isset($_POST['comptage']) && is_array($_POST['comptage'])) {
-        foreach ($_POST['comptage'] as $stock_id => $qte_saisie) {
-            if ($qte_saisie === '')
-                continue;
-            $qte = (int) $qte_saisie;
+        foreach ($_POST['comptage'] as $stock_id => $data) {
             $stock_id = (int) $stock_id;
-            $stmt = $pdo->prepare("SELECT quantite, materiel_id FROM stocks WHERE id = ?");
+
+            if (!isset($data['counted']) || $data['counted'] === '')
+                continue;
+            $counted = (int) $data['counted'];
+
+            $stmt = $pdo->prepare("SELECT quantite, materiel_id, date_peremption FROM stocks WHERE id = ?");
             $stmt->execute([$stock_id]);
             $current = $stmt->fetch();
-            if ($current && $current['quantite'] != $qte) {
-                $stmt_hist = $pdo->prepare("INSERT INTO historique_comptages (inventaire_id, lieu_id, materiel_id, qte_avant, qte_apres) VALUES (?, ?, ?, ?, ?)");
-                $stmt_hist->execute([$inv_id, $lieu_id, $current['materiel_id'], $current['quantite'], $qte]);
-                if ($qte === 0)
+            if (!$current)
+                continue;
+
+            $mat_id = $current['materiel_id'];
+            $qte_avant = $current['quantite'];
+
+            $motif = $data['motif'] ?? '';
+            $added_qty = (int) ($data['added_qty'] ?? 0);
+            $reserve_stock_id = $data['reserve_stock_id'] ?? '';
+            $added_date = !empty($data['added_date']) ? $data['added_date'] : null;
+
+            $qte_apres_totale = $counted + $added_qty;
+            $action_log = null;
+
+            // Si on a compté une différence OU si on rajoute quelque chose
+            if ($qte_avant != $counted || $added_qty > 0) {
+
+                // 1. MISE À JOUR IMMÉDIATE DU LOT D'ORIGINE COMPTÉ
+                // (Cela résout le bug de l'écrasement post-ajout)
+                if ($counted == 0) {
                     $pdo->prepare("DELETE FROM stocks WHERE id = ?")->execute([$stock_id]);
-                else
-                    $pdo->prepare("UPDATE stocks SET quantite = ? WHERE id = ?")->execute([$qte, $stock_id]);
+                } else {
+                    $pdo->prepare("UPDATE stocks SET quantite = ? WHERE id = ?")->execute([$counted, $stock_id]);
+                }
+
+                // 2. TRAITEMENT DE LA QUANTITÉ AJOUTÉE
+                if ($added_qty > 0) {
+
+                    if ($est_reserve) {
+                        // C'est un apport externe directement dans la réserve
+                        $action_log = "Appoint externe (+$added_qty)";
+                    } else {
+                        // C'est un transfert depuis une réserve vers un sac
+                        if (is_numeric($reserve_stock_id)) {
+                            $stmt_res = $pdo->prepare("SELECT id, quantite, date_peremption, lieu_id FROM stocks WHERE id = ?");
+                            $stmt_res->execute([$reserve_stock_id]);
+                            $reserve_lot = $stmt_res->fetch();
+
+                            if ($reserve_lot) {
+                                $added_date = $reserve_lot['date_peremption']; // On hérite de la date du lot
+
+                                // Déduction du lot dans la réserve d'origine
+                                if ($reserve_lot['quantite'] <= $added_qty) {
+                                    $pdo->prepare("DELETE FROM stocks WHERE id = ?")->execute([$reserve_lot['id']]);
+                                } else {
+                                    $pdo->prepare("UPDATE stocks SET quantite = quantite - ? WHERE id = ?")->execute([$added_qty, $reserve_lot['id']]);
+                                }
+                                $nom_res = $pdo->query("SELECT nom FROM lieux_stockage WHERE id = " . $reserve_lot['lieu_id'])->fetchColumn() ?: 'Réserve';
+                                $action_log = "Recomplété (+$added_qty) depuis '$nom_res'";
+                            }
+                        } else {
+                            $action_log = "Recomplété (+$added_qty) par saisie manuelle externe";
+                        }
+                    }
+
+                    // On fusionne ou on crée la ligne dans le lieu d'inventaire actuel
+                    $stmt_check = $pdo->prepare("SELECT id FROM stocks WHERE materiel_id = ? AND lieu_id = ? AND IFNULL(date_peremption, '') = IFNULL(?, '')");
+                    $stmt_check->execute([$mat_id, $lieu_id, $added_date]);
+                    $stock_existant = $stmt_check->fetch();
+
+                    if ($stock_existant) {
+                        $pdo->prepare("UPDATE stocks SET quantite = quantite + ? WHERE id = ?")->execute([$added_qty, $stock_existant['id']]);
+                    } else {
+                        $pdo->prepare("INSERT INTO stocks (materiel_id, lieu_id, quantite, date_peremption) VALUES (?, ?, ?, ?)")->execute([$mat_id, $lieu_id, $added_qty, $added_date]);
+                    }
+                }
+
+                // 3. CONSTRUCTION DE L'HISTORIQUE DE BASE
+                if ($qte_avant != $counted) {
+                    $diff = $counted - $qte_avant;
+                    $signe = $diff > 0 ? '+' : '';
+
+                    if ($est_reserve && $motif === 'keep_gap') {
+                        $txt_base = "Ajustement de routine ($signe$diff)";
+                    } else {
+                        $txt_base = "Base corrigée ($signe$diff)";
+                    }
+
+                    // Concaténation de l'action de base et de l'action d'ajout
+                    $action_log = $action_log ? "$txt_base | $action_log" : $txt_base;
+                }
+
+                // 4. ENREGISTREMENT DU RAPPORT
+                $stmt_hist = $pdo->prepare("INSERT INTO historique_comptages (inventaire_id, lieu_id, materiel_id, qte_avant, qte_apres, action_corrective) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt_hist->execute([$inv_id, $lieu_id, $mat_id, $qte_avant, $qte_apres_totale, $action_log]);
             }
         }
-        $pdo->prepare("INSERT OR IGNORE INTO inventaires_lieux (inventaire_id, lieu_id) VALUES (?, ?)")->execute([$inv_id, $lieu_id]);
-        header("Location: inventaire.php?msg=lieu_valide");
-        exit;
     }
+
+    // On valide le lieu (même si le sac est vide et que la boucle n'a pas tourné)
+    $pdo->prepare("INSERT OR IGNORE INTO inventaires_lieux (inventaire_id, lieu_id) VALUES (?, ?)")->execute([$inv_id, $lieu_id]);
+    header("Location: inventaire.php?msg=lieu_valide");
+    exit;
 }
 
 if (isset($_GET['msg'])) {
@@ -180,7 +280,6 @@ if ($action === 'rapport') {
                 margin-bottom: 25px;
                 border-bottom: 2px solid #d32f2f;
                 padding-bottom: 15px;
-                letter-spacing: 1px;
             }
 
             .print-header img {
@@ -199,8 +298,7 @@ if ($action === 'rapport') {
                     Retour au résumé</a>
                 <h2 style="margin: 10px 0 0 0; color: #d32f2f;">📊 Rapport d'inventaire</h2>
                 <p style="margin: 5px 0 0 0; color: #666; font-style: italic;">Clôturé le
-                    <?php echo date('d/m/Y à H:i', strtotime($inv['date_fin'])); ?>
-                </p>
+                    <?php echo date('d/m/Y à H:i', strtotime($inv['date_fin'])); ?></p>
             </div>
             <div class="no-print" style="display: flex; gap: 10px;">
                 <a href="inventaire.php?action=export_xls" class="carte-animee"
@@ -211,7 +309,8 @@ if ($action === 'rapport') {
                     Imprimer / PDF</button>
             </div>
         </div>
-        <h3 style="color: #c62828;">Écarts de la base de donnée constatés</h3>
+
+        <h3 style="color: #c62828;">Écarts de la base de données corrigés</h3>
         <?php if (empty($diffs)): ?>
             <div
                 style="background: #e8f5e9; color: #2e7d32; padding: 15px; border-radius: 4px; text-align: center; font-size: 16px; border: 1px solid #c8e6c9;">
@@ -220,11 +319,11 @@ if ($action === 'rapport') {
             <table class="table-manager" style="margin-bottom: 30px; border: 1px solid #ddd;">
                 <thead>
                     <tr>
-                        <th>Lieu</th>
-                        <th>Matériel</th>
-                        <th style="text-align: center;">Avant</th>
-                        <th style="text-align: center;">Après</th>
-                        <th style="text-align: center;">Écart</th>
+                        <th style="width: 20%;">Lieu</th>
+                        <th style="width: 30%;">Matériel</th>
+                        <th style="text-align: center; width: 10%;">Avant</th>
+                        <th style="text-align: center; width: 10%;">Après</th>
+                        <th style="text-align: left; width: 30%;">Détails (Action Corrective)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -234,23 +333,24 @@ if ($action === 'rapport') {
                         $signe = $ecart > 0 ? '+' : ''; ?>
                         <tr>
                             <td style="font-weight: bold; border-right: 1px solid #eee;">
-                                <?php echo $d['lieu_icone'] . ' ' . htmlspecialchars($d['lieu_nom']); ?>
-                            </td>
+                                <?php echo $d['lieu_icone'] . ' ' . htmlspecialchars($d['lieu_nom']); ?></td>
                             <td style="border-right: 1px solid #eee;"><?php echo htmlspecialchars($d['materiel_nom']); ?></td>
                             <td style="text-align: center; color: #999; border-right: 1px solid #eee;">
-                                <?php echo $d['qte_avant']; ?>
-                            </td>
+                                <?php echo $d['qte_avant']; ?></td>
                             <td style="text-align: center; font-weight: bold; border-right: 1px solid #eee;">
                                 <?php echo $d['qte_apres']; ?>
+                                <div style="font-size: 11px; color: <?php echo $couleur_ecart; ?>;">(<?php echo $signe . $ecart; ?>)
+                                </div>
                             </td>
-                            <td style="text-align: center; font-weight: bold; color: <?php echo $couleur_ecart; ?>;">
-                                <?php echo $signe . $ecart; ?>
+                            <td style="font-size: 12px; color: #555;">
+                                <?php echo $d['action_corrective'] ? htmlspecialchars($d['action_corrective']) : 'Ajustement manuel'; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
         <?php endif; ?>
+
         <h3 style="color: #2c3e50; margin-top: 40px; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">📋 Inventaire
             Détaillé Complet</h3>
         <?php if (empty($inventory_by_lieu)): ?>
@@ -275,11 +375,9 @@ if ($action === 'rapport') {
                             <?php foreach ($articles as $art): ?>
                                 <tr>
                                     <td style="border-right: 1px solid #eee; font-size: 13px;">
-                                        <?php echo htmlspecialchars($art['categorie_nom']); ?>
-                                    </td>
+                                        <?php echo htmlspecialchars($art['categorie_nom']); ?></td>
                                     <td style="border-right: 1px solid #eee; font-size: 13px; font-weight: 500;">
-                                        <?php echo htmlspecialchars($art['materiel_nom']); ?>
-                                    </td>
+                                        <?php echo htmlspecialchars($art['materiel_nom']); ?></td>
                                     <td style="text-align: center; font-size: 12px; color: #666; border-right: 1px solid #eee;">
                                         <?php echo $art['date_peremption'] ? date('d/m/Y', strtotime($art['date_peremption'])) : '-'; ?>
                                     </td>
@@ -304,6 +402,7 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
         header('Location: inventaire.php');
         exit;
     }
+
     $stmt_lieu = $pdo->prepare("SELECT * FROM lieux_stockage WHERE id = :id");
     $stmt_lieu->execute(['id' => $lieu_id]);
     $lieu = $stmt_lieu->fetch();
@@ -312,12 +411,23 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
         exit;
     }
 
-    $stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.quantite, s.date_peremption, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom");
+    $est_reserve = $lieu['est_reserve'] == 1;
+
+    $stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.quantite, s.date_peremption, m.id AS materiel_id, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom");
     $stmt_stocks->execute(['lieu_id' => $lieu_id]);
     $stocks = $stmt_stocks->fetchAll();
+
     $stocks_par_categorie = [];
     foreach ($stocks as $stock) {
         $stocks_par_categorie[$stock['categorie_nom']][] = $stock;
+    }
+
+    $reserves_par_materiel = [];
+    if (!$est_reserve) {
+        $stmt_reserves = $pdo->query("SELECT s.id as reserve_stock_id, s.materiel_id, s.quantite, s.date_peremption, l.nom as lieu_nom FROM stocks s JOIN lieux_stockage l ON s.lieu_id = l.id WHERE l.est_reserve = 1 AND s.quantite > 0 ORDER BY s.date_peremption ASC");
+        foreach ($stmt_reserves->fetchAll() as $res) {
+            $reserves_par_materiel[$res['materiel_id']][] = $res;
+        }
     }
     ?>
     <div class="white-box"
@@ -326,7 +436,10 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
             <div>
                 <a href="inventaire.php" style="color: #666; text-decoration: none; font-size: 14px;">⬅ Annuler et retourner
                     au menu</a>
-                <h2 style="margin: 5px 0 0 0; color: #333;">📋 Pointage : <?php echo htmlspecialchars($lieu['nom']); ?></h2>
+                <h2 style="margin: 5px 0 0 0; color: #333;">📋 Pointage : <?php echo htmlspecialchars($lieu['nom']); ?>
+                    <?php if ($est_reserve)
+                        echo '<span style="background: #e3f2fd; color: #1565c0; font-size: 12px; padding: 4px 8px; border-radius: 4px; margin-left: 10px; border: 1px solid #bbdefb; vertical-align: middle;">📦 RÉSERVE</span>'; ?>
+                </h2>
             </div>
             <div style="display: flex; gap: 15px;">
                 <div
@@ -337,8 +450,7 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                 <div
                     style="background: #fff3e0; padding: 10px 20px; border-radius: 8px; text-align: center; border: 1px solid #ffe0b2;">
                     <div style="font-size: 24px; font-weight: bold; color: #ef6c00;" id="compteur-restants">
-                        <?php echo count($stocks); ?>
-                    </div>
+                        <?php echo count($stocks); ?></div>
                     <div style="font-size: 12px; color: #ef6c00; text-transform: uppercase;">À vérifier</div>
                 </div>
             </div>
@@ -368,20 +480,107 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($articles as $art): ?>
-                                <tr class="item-row" data-etat="vide" style="transition: background-color 0.3s;">
+                            <?php foreach ($articles as $art):
+                                $sid = $art['stock_id'];
+                                $theo = $art['quantite'];
+                                $mat_id = $art['materiel_id'];
+                                ?>
+                                <tr class="item-row" data-stock-id="<?php echo $sid; ?>" data-theo="<?php echo $theo; ?>"
+                                    data-etat="vide" style="transition: background-color 0.3s;">
                                     <td style="font-weight: 500; color: #333;"><?php echo htmlspecialchars($art['materiel_nom']); ?>
                                     </td>
                                     <td style="text-align: center; color: #666; font-size: 13px;">
                                         <?php echo $art['date_peremption'] ? date('d/m/Y', strtotime($art['date_peremption'])) : '-'; ?>
                                     </td>
                                     <td style="text-align: center; font-size: 18px; font-weight: bold; color: #999;">
-                                        <?php echo $art['quantite']; ?>
-                                    </td>
-                                    <td style="text-align: center;"><input type="number" min="0"
-                                            name="comptage[<?php echo $art['stock_id']; ?>]" class="input-comptage"
-                                            data-attendu="<?php echo $art['quantite']; ?>" oninput="verifierLigne(this)" placeholder="?"
+                                        <?php echo $theo; ?></td>
+                                    <td style="text-align: center;">
+                                        <input type="number" min="0" name="comptage[<?php echo $sid; ?>][counted]"
+                                            class="input-comptage" data-attendu="<?php echo $theo; ?>"
+                                            oninput="checkDifference(this, <?php echo $est_reserve ? 'true' : 'false'; ?>)"
+                                            placeholder="?"
                                             style="width: 80px; padding: 10px; font-size: 18px; text-align: center; border: 2px solid #ccc; border-radius: 6px; font-weight: bold; outline: none;">
+                                        <input type="hidden" name="comptage[<?php echo $sid; ?>][materiel_id]"
+                                            value="<?php echo $mat_id; ?>">
+                                    </td>
+                                </tr>
+
+                                <tr class="refill-row" id="refill-<?php echo $sid; ?>"
+                                    style="display: none; background-color: #fdfaf6; border-bottom: 2px solid #ddd;">
+                                    <td colspan="4" style="padding: 10px 10px 10px 40px; border-left: 4px solid #ef6c00;">
+
+                                        <?php if ($est_reserve): ?>
+                                            <span class="missing-text-reserve" style="color: #ef6c00; font-weight: bold; font-size: 14px;">↳
+                                                Écart constaté.</span>
+
+                                            <div class="reserve-tools"
+                                                style="display: flex; align-items: center; gap: 10px; margin-top: 10px; background: white; padding: 10px; border-radius: 4px; border: 1px solid #ccc; flex-wrap: wrap;">
+                                                <label style="font-size: 12px; font-weight:bold; color:#333;">Action corrective :</label>
+                                                <select name="comptage[<?php echo $sid; ?>][motif]" class="select-motif-reserve"
+                                                    style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;"
+                                                    onchange="toggleReserveMotif(this)">
+                                                    <option value="keep_gap">Garder l'écart (Mise à jour de la base)</option>
+                                                    <option value="appoint">Faire un appoint (Stock externe / Nouvelle livraison)</option>
+                                                </select>
+
+                                                <div class="reserve-extern-container"
+                                                    style="display: none; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                                    <label style="font-size: 12px; font-weight:bold; color:#333; margin-left: 10px;">Qté de
+                                                        l'appoint :</label>
+                                                    <input type="number" name="comptage[<?php echo $sid; ?>][added_qty]"
+                                                        class="input-added-qty" value="0" min="0"
+                                                        style="width: 60px; padding: 6px; text-align: center; border: 1px solid #aaa; border-radius: 3px;">
+
+                                                    <label style="font-size: 12px; font-weight:bold; color:#333; margin-left: 10px;">Nouv.
+                                                        Péremption :</label>
+                                                    <input type="date" name="comptage[<?php echo $sid; ?>][added_date]"
+                                                        class="input-added-date"
+                                                        style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
+                                                </div>
+                                            </div>
+
+                                        <?php else: ?>
+                                            <span class="missing-text" style="color: #ef6c00; font-weight: bold; font-size: 14px;">↳ Il
+                                                manque unité(s).</span>
+
+                                            <div class="refill-tools"
+                                                style="display: flex; align-items: center; gap: 10px; margin-top: 10px; background: white; padding: 10px; border-radius: 4px; border: 1px solid #ccc; flex-wrap: wrap;">
+                                                <label style="font-size: 12px; font-weight:bold; color:#333;">Choisir le lot pour compléter
+                                                    :</label>
+                                                <select name="comptage[<?php echo $sid; ?>][reserve_stock_id]" class="input-reserve-lot"
+                                                    style="padding: 6px; border: 1px solid #aaa; border-radius: 3px; max-width: 350px;"
+                                                    onchange="updateMaxQty(this)">
+                                                    <option value="">-- Ne pas recompléter (Garder l'écart) --</option>
+                                                    <?php
+                                                    $lots = $reserves_par_materiel[$mat_id] ?? [];
+                                                    foreach ($lots as $res):
+                                                        $date_format = $res['date_peremption'] ? date('d/m/Y', strtotime($res['date_peremption'])) : 'Aucune';
+                                                        $label = htmlspecialchars($res['lieu_nom']) . " | Pér: " . $date_format . " | Dispo: " . $res['quantite'];
+                                                        ?>
+                                                        <option value="<?php echo $res['reserve_stock_id']; ?>"
+                                                            data-max="<?php echo $res['quantite']; ?>">
+                                                            <?php echo $label; ?>
+                                                        </option>
+                                                    <?php endforeach; ?>
+                                                    <option value="manual">Saisie manuelle externe</option>
+                                                </select>
+
+                                                <label style="font-size: 12px; font-weight:bold; color:#333; margin-left: 10px;">Qté ajoutée
+                                                    :</label>
+                                                <input type="number" name="comptage[<?php echo $sid; ?>][added_qty]" class="input-added-qty"
+                                                    value="0" min="0" oninput="checkMaxQty(this)"
+                                                    style="width: 60px; padding: 6px; text-align: center; border: 1px solid #aaa; border-radius: 3px;">
+
+                                                <div class="manual-date-container"
+                                                    style="display: none; align-items: center; gap: 10px; margin-left: 10px;">
+                                                    <label style="font-size: 12px; font-weight:bold; color:#333;">Nouv. Pér. :</label>
+                                                    <input type="date" name="comptage[<?php echo $sid; ?>][added_date]"
+                                                        class="input-added-date"
+                                                        style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
+                                                </div>
+                                            </div>
+                                        <?php endif; ?>
+
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -390,11 +589,168 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>
-        <div style="text-align: center; margin: 40px 0; padding-bottom: 40px;"><button type="button"
-                onclick="validerFormulaire()" class="carte-animee"
-                style="background-color: #2e7d32; color: white; border: none; padding: 15px 40px; font-size: 20px; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(46,125,50,0.3);">✅
-                Enregistrer ce sac</button></div>
+        <div style="text-align: center; margin: 40px 0; padding-bottom: 40px;">
+            <button type="button" onclick="validerFormulaire()" class="carte-animee"
+                style="background-color: #2e7d32; color: white; border: none; padding: 15px 40px; font-size: 20px; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(46,125,50,0.3);">
+                ✅ Valider ce lieu
+            </button>
+        </div>
     </form>
+
+    <script>
+        function checkDifference(input, isReserve) {
+            const row = input.closest('.item-row');
+            const stockId = row.getAttribute('data-stock-id');
+            const theo = parseInt(row.getAttribute('data-theo'));
+            let counted = parseInt(input.value);
+
+            if (isNaN(counted)) {
+                row.style.backgroundColor = 'transparent';
+                input.style.borderColor = '#ccc';
+                row.setAttribute('data-etat', 'vide');
+                document.getElementById('refill-' + stockId).style.display = 'none';
+                recalculerCompteurs();
+                return;
+            }
+
+            const refillRow = document.getElementById('refill-' + stockId);
+
+            if (counted === theo) {
+                row.style.backgroundColor = '#e8f5e9';
+                input.style.borderColor = '#4caf50';
+                row.setAttribute('data-etat', 'bon');
+                refillRow.style.display = 'none';
+                if (!isReserve) {
+                    refillRow.querySelector('.input-added-qty').value = 0;
+                }
+            } else {
+                row.style.backgroundColor = '#ffebee';
+                input.style.borderColor = '#f44336';
+                row.setAttribute('data-etat', 'erreur');
+                refillRow.style.display = 'table-row';
+
+                const diff = counted - theo;
+
+                if (isReserve) {
+                    const missingText = refillRow.querySelector('.missing-text-reserve');
+                    const motifSelect = refillRow.querySelector('.select-motif-reserve');
+
+                    if (diff > 0) {
+                        missingText.innerHTML = `↳ Vous avez trouvé <strong>${diff}</strong> unité(s) supplémentaire(s).`;
+                    } else {
+                        missingText.innerHTML = `↳ Il manque <strong>${Math.abs(diff)}</strong> unité(s).`;
+                    }
+
+                    // On remet l'action à "Garder l'écart" par défaut
+                    motifSelect.value = 'keep_gap';
+                    toggleReserveMotif(motifSelect);
+
+                } else {
+                    const refillTools = refillRow.querySelector('.refill-tools');
+                    const missingText = refillRow.querySelector('.missing-text');
+                    const addedQtyInput = refillRow.querySelector('.input-added-qty');
+
+                    if (counted < theo) {
+                        missingText.innerHTML = `↳ Il manque <strong>${theo - counted}</strong> unité(s).`;
+                        refillTools.style.display = 'flex';
+                    } else {
+                        missingText.innerHTML = `↳ Vous avez trouvé <strong>${counted - theo}</strong> unité(s) supplémentaire(s). L'inventaire de ce sac sera mis à jour (+${counted - theo}).`;
+                        refillTools.style.display = 'none';
+                        addedQtyInput.value = 0;
+                    }
+                }
+            }
+            recalculerCompteurs();
+        }
+
+        function toggleReserveMotif(selectElement) {
+            const container = selectElement.closest('.refill-row');
+            const externContainer = container.querySelector('.reserve-extern-container');
+            const addedQtyInput = container.querySelector('.input-added-qty');
+
+            if (selectElement.value === 'appoint') {
+                externContainer.style.display = 'flex';
+                // Astuce : On pré-remplit la quantité manquante si besoin
+                const stockId = container.id.replace('refill-', '');
+                const itemRow = document.querySelector(`.item-row[data-stock-id="${stockId}"]`);
+                const theo = parseInt(itemRow.getAttribute('data-theo'));
+                const counted = parseInt(itemRow.querySelector('.input-comptage').value) || 0;
+
+                if (counted < theo) {
+                    addedQtyInput.value = theo - counted;
+                } else {
+                    addedQtyInput.value = 0;
+                }
+            } else {
+                externContainer.style.display = 'none';
+                addedQtyInput.value = 0;
+            }
+        }
+
+        function updateMaxQty(selectElement) {
+            const container = selectElement.closest('.refill-row');
+            const manualDateContainer = container.querySelector('.manual-date-container');
+            const addedQtyInput = container.querySelector('.input-added-qty');
+
+            if (selectElement.value === 'manual') {
+                manualDateContainer.style.display = 'flex';
+                addedQtyInput.removeAttribute('max');
+            } else if (selectElement.value === '') {
+                manualDateContainer.style.display = 'none';
+                addedQtyInput.removeAttribute('max');
+                addedQtyInput.value = 0;
+            } else {
+                manualDateContainer.style.display = 'none';
+                const selectedOption = selectElement.options[selectElement.selectedIndex];
+                const max = selectedOption.getAttribute('data-max');
+                addedQtyInput.setAttribute('max', max);
+
+                if (parseInt(addedQtyInput.value) > parseInt(max)) {
+                    addedQtyInput.value = max;
+                }
+            }
+            selectElement.style.borderColor = '#aaa';
+        }
+
+        function checkMaxQty(inputElement) {
+            const max = inputElement.getAttribute('max');
+            if (max && parseInt(inputElement.value) > parseInt(max)) {
+                inputElement.value = max;
+            }
+        }
+
+        function validerFormulaire() {
+            let erreurLotManquant = false;
+
+            document.querySelectorAll('.refill-row').forEach(refillRow => {
+                if (refillRow.style.display !== 'none') {
+                    const selectLot = refillRow.querySelector('.input-reserve-lot'); // Existe uniquement pour les sacs
+                    const addedQty = refillRow.querySelector('.input-added-qty');
+                    if (selectLot && addedQty) {
+                        if (parseInt(addedQty.value) > 0 && selectLot.value === "") {
+                            erreurLotManquant = true;
+                            selectLot.style.borderColor = '#f44336';
+                        } else if (selectLot) {
+                            selectLot.style.borderColor = '#aaa';
+                        }
+                    }
+                }
+            });
+
+            if (erreurLotManquant) {
+                alert("⚠️ Veuillez choisir un lot de réserve pour le matériel que vous rajoutez (ou remettez la quantité ajoutée à 0).");
+                return;
+            }
+
+            const lignesVides = document.querySelectorAll('.item-row[data-etat="vide"]').length;
+            if (lignesVides > 0) {
+                if (!confirm(lignesVides + " articles n'ont pas été remplis. Leurs quantités théoriques seront conservées. Valider ce lieu ?")) return;
+            } else {
+                if (!confirm("Tout a été pointé. Es-tu sûr de vouloir valider ce lieu ?")) return;
+            }
+            document.getElementById('form-inventaire').submit();
+        }
+    </script>
     <?php
 }
 
@@ -403,19 +759,27 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
 // ==========================================
 elseif ($inventaire_actif) {
     echo $message;
-    $lieux = $pdo->query("SELECT * FROM lieux_stockage ORDER BY type, nom")->fetchAll();
+    $lieux = $pdo->query("SELECT * FROM lieux_stockage ORDER BY est_reserve DESC, type, nom")->fetchAll();
+
     $stmt_faits = $pdo->prepare("SELECT lieu_id FROM inventaires_lieux WHERE inventaire_id = ?");
     $stmt_faits->execute([$inventaire_actif['id']]);
-    $lieux_faits_bruts = $stmt_faits->fetchAll();
-    $lieux_faits = array_column($lieux_faits_bruts, 'lieu_id');
+    $lieux_faits = $stmt_faits->fetchAll(PDO::FETCH_COLUMN);
     $tous_faits = (count($lieux_faits) === count($lieux) && count($lieux) > 0);
+
+    $reserves_en_attente = false;
+    foreach ($lieux as $l) {
+        if ($l['est_reserve'] == 1 && !in_array($l['id'], $lieux_faits)) {
+            $reserves_en_attente = true;
+            break;
+        }
+    }
     ?>
     <div
         style="background: #fff3e0; padding: 20px; border-radius: 8px; border-left: 5px solid #ef6c00; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
         <div>
             <h2 style="margin: 0 0 5px 0; color: #e65100;">INVENTAIRE EN COURS</h2>
-            <p style="margin: 0; color: #666;">Cliquez sur un lieu de stockage pour l'inventorier. Une fois validé il ne
-                sera plus possible de le modifier.</p>
+            <p style="margin: 0; color: #666;">Cliquez sur un lieu de stockage pour l'inventorier. <strong>L'inventaire des
+                    réserves est obligatoire avant de pouvoir pointer les sacs.</strong></p>
         </div>
         <div style="font-size: 24px; font-weight: bold; color: #ef6c00;">
             <span id="compteur-faits"><?php echo count($lieux_faits); ?></span> / <span
@@ -426,24 +790,40 @@ elseif ($inventaire_actif) {
     <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 40px;">
         <?php foreach ($lieux as $lieu):
             $est_fait = in_array($lieu['id'], $lieux_faits);
+            $est_reserve = $lieu['est_reserve'] == 1;
+            $verrouille = !$est_reserve && $reserves_en_attente;
+
             $icone = !empty($lieu['icone']) ? $lieu['icone'] : '🎒';
             ?>
-            <div id="lieu-container-<?php echo $lieu['id']; ?>" class="lieu-container" data-id="<?php echo $lieu['id']; ?>"
-                data-nom="<?php echo htmlspecialchars($lieu['nom']); ?>" data-icone="<?php echo htmlspecialchars($icone); ?>">
+            <div class="lieu-container" data-id="<?php echo $lieu['id']; ?>"
+                data-nom="<?php echo htmlspecialchars($lieu['nom']); ?>">
                 <?php if ($est_fait): ?>
                     <div
-                        style="display: block; width: 200px; padding: 20px; background-color: #e8f5e9; border: 2px solid #4caf50; border-radius: 8px; color: #2e7d32; text-align: center; opacity: 0.7; box-sizing: border-box;">
+                        style="display: block; width: 200px; padding: 20px; background-color: #e8f5e9; border: 2px solid #4caf50; border-radius: 8px; color: #2e7d32; text-align: center; opacity: 0.7; box-sizing: border-box; position:relative;">
+                        <?php if ($est_reserve)
+                            echo '<div style="position:absolute; top:-10px; right:-10px; background:#1565c0; color:white; font-size:10px; font-weight:bold; padding:4px 8px; border-radius:20px;">📦 RÉSERVE</div>'; ?>
                         <div style="font-size: 40px; margin-bottom: 10px;">✅</div>
                         <strong
                             style="font-size: 16px; display: block; text-decoration: line-through;"><?php echo htmlspecialchars($lieu['nom']); ?></strong>
                         <span style="font-size: 12px; font-weight: bold; margin-top: 10px; display: block;">Déjà pointé</span>
                     </div>
+
+                <?php elseif ($verrouille): ?>
+                    <div
+                        style="display: block; width: 200px; padding: 20px; background-color: #f9f9f9; border: 2px solid #ddd; border-radius: 8px; color: #999; text-align: center; opacity: 0.6; box-sizing: border-box;">
+                        <div style="font-size: 40px; margin-bottom: 10px;">🔒</div>
+                        <strong style="font-size: 16px; display: block;"><?php echo htmlspecialchars($lieu['nom']); ?></strong>
+                        <span style="font-size: 11px; font-weight: bold; margin-top: 10px; display: block; color: #d32f2f;">Veuillez
+                            inventorier les réserves en premier</span>
+                    </div>
+
                 <?php else: ?>
                     <?php if ($peut_editer): ?>
                         <a href="inventaire.php?action=comptage&lieu_id=<?php echo $lieu['id']; ?>"
-                            onclick="return confirm('Êtes-vous sûr de vouloir commencer l\'inventaire de ce lieu ?');"
-                            class="carte-animee"
-                            style="display: block; width: 200px; padding: 20px; background-color: white; border: 2px solid transparent; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-decoration: none; color: #333; text-align: center; box-sizing: border-box;">
+                            onclick="return confirm('Commencer l\'inventaire de ce lieu ?');" class="carte-animee"
+                            style="display: block; width: 200px; padding: 20px; background-color: white; border: 2px solid transparent; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-decoration: none; color: #333; text-align: center; box-sizing: border-box; position:relative;">
+                            <?php if ($est_reserve)
+                                echo '<div style="position:absolute; top:-10px; right:-10px; background:#1565c0; color:white; font-size:10px; font-weight:bold; padding:4px 8px; border-radius:20px; box-shadow:0 2px 4px rgba(0,0,0,0.2);">📦 RÉSERVE</div>'; ?>
                             <div style="font-size: 40px; margin-bottom: 10px;"><?php echo htmlspecialchars($icone); ?></div>
                             <strong style="font-size: 16px; display: block;"><?php echo htmlspecialchars($lieu['nom']); ?></strong>
                             <span style="font-size: 12px; color: #d32f2f; font-weight: bold; margin-top: 10px; display: block;">👉 Faire
@@ -470,9 +850,8 @@ elseif ($inventaire_actif) {
             <a href="inventaire.php?action=cloturer"
                 onclick="return confirm('Êtes-vous sûr de vouloir clôturer définitivement cet inventaire global ?');"
                 class="carte-animee"
-                style="display: inline-block; background-color: #2e7d32; color: white; padding: 15px 40px; font-size: 20px; font-weight: bold; text-decoration: none; border-radius: 8px; box-shadow: 0 4px 10px rgba(46,125,50,0.3);">
-                🔒 CLÔTURER L'INVENTAIRE GLOBAL
-            </a>
+                style="display: inline-block; background-color: #2e7d32; color: white; padding: 15px 40px; font-size: 20px; font-weight: bold; text-decoration: none; border-radius: 8px; box-shadow: 0 4px 10px rgba(46,125,50,0.3);">🔒
+                CLÔTURER L'INVENTAIRE GLOBAL</a>
         <?php endif; ?>
     </div>
     <?php
@@ -544,8 +923,7 @@ else {
                     <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
                     <h3 class="category-header"
                         style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                        <?php echo htmlspecialchars($categorie); ?>
-                    </h3>
+                        <?php echo htmlspecialchars($categorie); ?></h3>
                     <table class="table-manager" style="border: 1px solid #eee;">
                         <thead>
                             <tr>
@@ -563,8 +941,7 @@ else {
                                     <td style="font-weight: 500; color: #333; border-right: 1px solid #eee;">
                                         <?php echo htmlspecialchars($nom_mat); ?>
                                         <div style="font-size: 11px; color: #999; margin-top: 5px;">Total dispo :
-                                            <strong><?php echo $somme_totale_objet; ?></strong>
-                                        </div>
+                                            <strong><?php echo $somme_totale_objet; ?></strong></div>
                                     </td>
                                     <td style="font-size: 14px; color: #555;">
                                         <div style="display: flex; gap: 10px; flex-wrap: wrap;"><?php foreach ($lieux as $l): ?><span
