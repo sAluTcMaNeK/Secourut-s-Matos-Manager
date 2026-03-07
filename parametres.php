@@ -9,34 +9,8 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 
-// ==========================================
-// 1. MISE À JOUR DE LA BASE DE DONNÉES
-// ==========================================
-try {
-    $pdo->exec("ALTER TABLE categories ADD COLUMN couleur_fond TEXT DEFAULT '#2c3e50'");
-    $pdo->exec("ALTER TABLE categories ADD COLUMN couleur_texte TEXT DEFAULT '#ffffff'");
-} catch (PDOException $e) {
-}
-
-try {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS types_lieux (id INTEGER PRIMARY KEY AUTOINCREMENT, nom TEXT)");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS icones_lieux (id INTEGER PRIMARY KEY AUTOINCREMENT, icone TEXT)");
-
-    if ($pdo->query("SELECT COUNT(*) FROM types_lieux")->fetchColumn() == 0) {
-        $pdo->exec("INSERT INTO types_lieux (nom) VALUES ('Sac d''intervention'), ('Sac logistique'), ('Réserve')");
-    }
-    if ($pdo->query("SELECT COUNT(*) FROM icones_lieux")->fetchColumn() == 0) {
-        $pdo->exec("INSERT INTO icones_lieux (icone) VALUES ('🎒'), ('💼'), ('🏢'), ('🧰'), ('🚑'), ('💊')");
-    }
-} catch (PDOException $e) {
-}
-
-// ==========================================
-// 2. TRAITEMENT DES FORMULAIRES
-// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
-
     try {
         if ($action === 'add_cat') {
             $nom = trim($_POST['nom']);
@@ -59,16 +33,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("DELETE FROM categories WHERE id = ?")->execute([$id]);
                 $_SESSION['flash_success'] = "🗑️ Catégorie supprimée.";
             }
-        }
-
-        // --- GESTION DES TYPES ---
-        elseif ($action === 'add_type') {
+        } elseif ($action === 'add_type') {
             $nom = trim($_POST['nom']);
             if (!empty($nom)) {
                 $pdo->prepare("INSERT INTO types_lieux (nom) VALUES (?)")->execute([$nom]);
                 $_SESSION['flash_success'] = "✅ Nouveau type ajouté.";
             }
-        } elseif ($action === 'edit_type') { // NOUVEAU : Modification d'un type
+        } elseif ($action === 'edit_type') {
             $id = (int) $_POST['id'];
             $nom = trim($_POST['nom']);
             if (!empty($nom) && $id > 0) {
@@ -78,10 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'delete_type') {
             $pdo->prepare("DELETE FROM types_lieux WHERE id = ?")->execute([(int) $_POST['id']]);
             $_SESSION['flash_success'] = "🗑️ Type supprimé.";
-        }
-
-        // --- GESTION DES ICONES ---
-        elseif ($action === 'add_icone') {
+        } elseif ($action === 'add_icone') {
             if (!empty($_POST['icone'])) {
                 $pdo->prepare("INSERT INTO icones_lieux (icone) VALUES (?)")->execute([trim($_POST['icone'])]);
                 $_SESSION['flash_success'] = "✅ Icône ajoutée.";
@@ -90,7 +58,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("DELETE FROM icones_lieux WHERE id = ?")->execute([(int) $_POST['id']]);
             $_SESSION['flash_success'] = "🗑️ Icône supprimée.";
         }
-
     } catch (PDOException $e) {
         $_SESSION['flash_error'] = "❌ Erreur BDD : " . $e->getMessage();
     }
@@ -101,33 +68,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $categories = $pdo->query("SELECT * FROM categories ORDER BY nom")->fetchAll();
 $types_lieux = $pdo->query("SELECT * FROM types_lieux ORDER BY nom")->fetchAll();
 $icones = $pdo->query("SELECT * FROM icones_lieux ORDER BY id")->fetchAll();
-
 require_once 'includes/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-    <h2 style="color: #2c3e50; margin: 0;">⚙️ Paramètres Généraux</h2>
-    <span
-        style="background: #d32f2f; color: white; padding: 5px 15px; border-radius: 20px; font-size: 12px; font-weight: bold;">Espace
-        Administrateur</span>
+<div class="flex-between mb-20">
+    <h2 class="page-title text-dark mb-0">⚙️ Paramètres Généraux</h2>
+    <span class="badge badge-pill btn-danger-dark">Espace Administrateur</span>
 </div>
 
-<div style="display: flex; flex-wrap: wrap; gap: 20px;">
-    <div class="white-box" style="flex: 1; min-width: 350px;">
-        <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px;">🏷️ Catégories de
-            Matériel</h3>
-        <form method="POST" action="parametres.php"
-            style="display: flex; gap: 10px; margin-bottom: 20px; background: #f9f9f9; padding: 15px; border-radius: 6px; border: 1px solid #ddd;">
+<div class="flex-row">
+
+    <div class="white-box flex-1 min-w-350">
+        <h3 class="section-title">🏷️ Catégories de Matériel</h3>
+
+        <form method="POST" action="parametres.php" class="flex-center form-box mb-20">
             <input type="hidden" name="action" value="add_cat">
-            <input type="text" name="nom" placeholder="Nouvelle catégorie" required class="input-field"
-                style="margin: 0; flex: 2;">
+            <input type="text" name="nom" placeholder="Nouvelle catégorie" required class="input-field flex-2 mb-0">
             <input type="color" name="couleur_fond" value="#2c3e50" title="Fond"
                 style="height: 40px; width: 40px; border: none; cursor: pointer;">
             <input type="color" name="couleur_texte" value="#ffffff" title="Texte"
                 style="height: 40px; width: 40px; border: none; cursor: pointer;">
-            <button type="submit"
-                style="background: #2e7d32; color: white; border: none; border-radius: 4px; padding: 0 15px; cursor: pointer;">+</button>
+            <button type="submit" class="btn btn-success-dark">+</button>
         </form>
+
         <table class="table-manager" style="width: 100%;">
             <tbody>
                 <?php foreach ($categories as $cat): ?>
@@ -135,23 +98,22 @@ require_once 'includes/header.php';
                         <form method="POST" action="parametres.php">
                             <input type="hidden" name="action" value="edit_cat">
                             <input type="hidden" name="id" value="<?php echo $cat['id']; ?>">
-                            <td style="width: 40%;"><input type="text" name="nom"
-                                    value="<?php echo htmlspecialchars($cat['nom']); ?>" required class="input-field"
-                                    style="margin: 0; padding: 5px;"></td>
-                            <td style="width: 15%; text-align: center;"><input type="color" name="couleur_fond"
+                            <td style="width: 40%;">
+                                <input type="text" name="nom" value="<?php echo htmlspecialchars($cat['nom']); ?>" required
+                                    class="input-field mb-0" style="padding: 5px;">
+                            </td>
+                            <td class="text-center" style="width: 15%;"><input type="color" name="couleur_fond"
                                     value="<?php echo htmlspecialchars($cat['couleur_fond'] ?? '#2c3e50'); ?>"></td>
-                            <td style="width: 15%; text-align: center;"><input type="color" name="couleur_texte"
+                            <td class="text-center" style="width: 15%;"><input type="color" name="couleur_texte"
                                     value="<?php echo htmlspecialchars($cat['couleur_texte'] ?? '#ffffff'); ?>"></td>
-                            <td style="width: 30%; text-align: right;">
-                                <div style="display: flex; gap: 5px; justify-content: flex-end;">
-                                    <button type="submit"
-                                        style="background: #4caf50; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">💾</button>
+                            <td class="text-right" style="width: 30%;">
+                                <div class="flex-center" style="justify-content: flex-end;">
+                                    <button type="submit" class="btn btn-success btn-sm">💾</button>
                         </form>
-                        <form method="POST" action="parametres.php" onsubmit="return confirm('Supprimer ?');">
+                        <form method="POST" action="parametres.php" onsubmit="return confirm('Supprimer ?');" class="mb-0">
                             <input type="hidden" name="action" value="delete_cat">
                             <input type="hidden" name="id" value="<?php echo $cat['id']; ?>">
-                            <button type="submit"
-                                style="background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">🗑️</button>
+                            <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
                         </form>
         </div>
         </td>
@@ -161,18 +123,15 @@ require_once 'includes/header.php';
     </table>
 </div>
 
-<div style="flex: 1; min-width: 350px; display: flex; flex-direction: column; gap: 20px;">
-    <div class="white-box" style="margin: 0;">
-        <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px;">📋 Types de
-            Stockage</h3>
+<div class="flex-1 min-w-350" style="display: flex; flex-direction: column; gap: 20px;">
+    <div class="white-box mb-0">
+        <h3 class="section-title">📋 Types de Stockage</h3>
 
-        <form method="POST" action="parametres.php"
-            style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; align-items: center;">
+        <form method="POST" action="parametres.php" class="flex-row-sm align-center mb-15">
             <input type="hidden" name="action" value="add_type">
-            <input type="text" name="nom" placeholder="Ex: Boîte Pharmacie" required class="input-field"
-                style="margin: 0; flex: 1; min-width: 150px;">
-            <button type="submit"
-                style="background: #2e7d32; color: white; border: none; border-radius: 4px; padding: 10px 15px; cursor: pointer; font-weight: bold;">Ajouter</button>
+            <input type="text" name="nom" placeholder="Ex: Boîte Pharmacie" required
+                class="input-field flex-1 min-w-150 mb-0">
+            <button type="submit" class="btn btn-success-dark">Ajouter</button>
         </form>
 
         <table class="table-manager" style="width: 100%;">
@@ -182,21 +141,19 @@ require_once 'includes/header.php';
                         <form method="POST" action="parametres.php">
                             <input type="hidden" name="action" value="edit_type">
                             <input type="hidden" name="id" value="<?php echo $type['id']; ?>">
-                            <td style="font-weight: 500; color: #555; width: 60%;">
+                            <td class="font-bold text-dark" style="width: 60%;">
                                 <input type="text" name="nom" value="<?php echo htmlspecialchars($type['nom']); ?>" required
-                                    class="input-field" style="margin: 0; padding: 5px;">
+                                    class="input-field mb-0" style="padding: 5px;">
                             </td>
-                            <td style="text-align: right; width: 40%;">
-                                <div style="display: flex; gap: 5px; justify-content: flex-end;">
-                                    <button type="submit"
-                                        style="background: #4caf50; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">💾</button>
+                            <td class="text-right" style="width: 40%;">
+                                <div class="flex-center" style="justify-content: flex-end;">
+                                    <button type="submit" class="btn btn-success btn-sm">💾</button>
                         </form>
-                        <form method="POST" action="parametres.php" style="margin: 0;"
-                            onsubmit="return confirm('Supprimer ce type ?');">
+                        <form method="POST" action="parametres.php" onsubmit="return confirm('Supprimer ce type ?');"
+                            class="mb-0">
                             <input type="hidden" name="action" value="delete_type">
                             <input type="hidden" name="id" value="<?php echo $type['id']; ?>">
-                            <button type="submit"
-                                style="background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">🗑️</button>
+                            <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
                         </form>
         </div>
         </td>
@@ -206,23 +163,22 @@ require_once 'includes/header.php';
     </table>
 </div>
 
-<div class="white-box" style="margin: 0;">
-    <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px;">🖼️ Icônes
-        disponibles</h3>
-    <form method="POST" action="parametres.php" style="display: flex; gap: 10px; margin-bottom: 15px;">
+<div class="white-box mb-0">
+    <h3 class="section-title">🖼️ Icônes disponibles</h3>
+    <form method="POST" action="parametres.php" class="flex-center mb-15">
         <input type="hidden" name="action" value="add_icone">
-        <input type="text" name="icone" placeholder="Emoji (ex: 🩸)" required class="input-field"
-            style="margin: 0; flex: 1;">
-        <button type="submit"
-            style="background: #2e7d32; color: white; border: none; border-radius: 4px; padding: 0 15px; cursor: pointer; font-weight: bold;">Ajouter</button>
+        <input type="text" name="icone" placeholder="Emoji (ex: 🩸)" required class="input-field flex-1 mb-0">
+        <button type="submit" class="btn btn-success-dark">Ajouter</button>
     </form>
-    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+    <div class="flex-row-sm">
         <?php foreach ($icones as $ic): ?>
-            <form method="POST" action="parametres.php" style="margin: 0;" onsubmit="return confirm('Supprimer ?');">
+            <form method="POST" action="parametres.php" onsubmit="return confirm('Supprimer ?');" class="mb-0">
                 <input type="hidden" name="action" value="delete_icone">
                 <input type="hidden" name="id" value="<?php echo $ic['id']; ?>">
-                <button type="submit" title="Cliquez pour supprimer"
-                    style="background: #f4f7f6; border: 1px solid #ccc; border-radius: 8px; font-size: 24px; padding: 10px; cursor: pointer;"><?php echo htmlspecialchars($ic['icone']); ?></button>
+                <button type="submit" title="Cliquez pour supprimer" class="btn-outline-primary"
+                    style="font-size: 24px; padding: 10px; border-color: #ccc; border-radius: 8px;">
+                    <?php echo htmlspecialchars($ic['icone']); ?>
+                </button>
             </form>
         <?php endforeach; ?>
     </div>
