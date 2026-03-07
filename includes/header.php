@@ -2,23 +2,35 @@
 // includes/header.php
 $nom_utilisateur = htmlspecialchars($_SESSION['username'] ?? 'Utilisateur');
 $role_utilisateur = htmlspecialchars($_SESSION['role'] ?? '');
+$est_admin = ($role_utilisateur === 'admin');
 
-function getCouleurCategorie($nom_categorie)
-{
+// --- CHARGEMENT DYNAMIQUE DES COULEURS ---
+// On met en cache les couleurs des catégories pour éviter de faire 50 requêtes SQL
+global $pdo;
+$db_categories = [];
+if (isset($pdo)) {
+    try {
+        $stmt_cats = $pdo->query("SELECT nom, couleur_fond, couleur_texte FROM categories");
+        while ($row = $stmt_cats->fetch()) {
+            $db_categories[strtolower(trim($row['nom']))] = [
+                'bg' => $row['couleur_fond'] ?? '#2c3e50',
+                'text' => $row['couleur_texte'] ?? 'white'
+            ];
+        }
+    } catch (Exception $e) { }
+}
+
+function getCouleurCategorie($nom_categorie) {
+    global $db_categories;
     $nom = strtolower(trim($nom_categorie));
-    $nom = str_replace(['é', 'è', 'ê'], 'e', $nom);
-    switch ($nom) {
-        case 'bilan':
-            return ['bg' => '#f1c40f', 'text' => '#333'];
-        case 'bobologie':
-            return ['bg' => '#8b0000', 'text' => 'white'];
-        case 'trauma':
-            return ['bg' => '#8e44ad', 'text' => 'white'];
-        case 'hemorragie':
-            return ['bg' => '#e74c3c', 'text' => 'white'];
-        default:
-            return ['bg' => '#2c3e50', 'text' => 'white'];
+    
+    // Si la catégorie existe en base avec une couleur, on la prend
+    if (isset($db_categories[$nom]) && !empty($db_categories[$nom]['bg'])) {
+        return ['bg' => $db_categories[$nom]['bg'], 'text' => $db_categories[$nom]['text']];
     }
+    
+    // Sinon, couleur par défaut
+    return ['bg' => '#2c3e50', 'text' => 'white'];
 }
 ?>
 <!DOCTYPE html>
@@ -30,24 +42,6 @@ function getCouleurCategorie($nom_categorie)
     <title>Secourut's Matos Manager</title>
     <link rel="icon" href="assets/img/favicon.png" type="image/png">
     <link rel="stylesheet" href="assets/css/style.css">
-
-    <script>
-        // 1. Gestion de la déconnexion automatique
-        let timeout;
-        function resetTimer() {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => { window.location.href = 'logout.php'; }, 300000);
-        }
-        window.onload = resetTimer; window.onmousemove = resetTimer; window.onmousedown = resetTimer;
-        window.ontouchstart = resetTimer; window.onclick = resetTimer; window.onkeypress = resetTimer;
-
-        // 2. Gestion du Menu Mobile
-        function toggleMenu() {
-            document.getElementById('sidebar').classList.toggle('ouvert');
-            const overlay = document.getElementById('overlay');
-            overlay.style.display = overlay.style.display === 'block' ? 'none' : 'block';
-        }
-    </script>
 </head>
 
 <body>
@@ -62,9 +56,11 @@ function getCouleurCategorie($nom_categorie)
         <a href="index.php">📊 Tableau de bord</a>
         <a href="materiel.php">📦 Catalogue Matériel</a>
         <a href="lieux.php">🎒 Sacs & Réserves</a>
-        <a href="remplissage.php">🔄 Remplissage</a>
+        <a href="remplissage.php">🚑 Vérification DPS</a>
         <a href="inventaire.php">📋 Faire l'inventaire</a>
-        <?php if ($_SESSION['role'] === 'admin'): ?>
+        
+        <?php if ($est_admin): ?>
+            <a href="parametres.php" style="margin-top: 15px;" class="admin-link">⚙️ Paramètres</a>
             <a href="utilisateurs.php" class="admin-link">👥 Utilisateurs</a>
         <?php endif; ?>
     </div>
@@ -99,3 +95,4 @@ function getCouleurCategorie($nom_categorie)
                     unset($_SESSION['flash_error']); ?>
                 </div>
             <?php endif; ?>
+<script src="assets/js/script.js"></script>
