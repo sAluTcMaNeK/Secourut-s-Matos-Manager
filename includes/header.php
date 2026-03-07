@@ -62,6 +62,7 @@ function getCouleurCategorie($nom_categorie) {
         <?php if ($est_admin): ?>
             <a href="parametres.php" style="margin-top: 15px;" class="admin-link">⚙️ Paramètres</a>
             <a href="utilisateurs.php" class="admin-link">👥 Utilisateurs</a>
+            <a href="historique.php" class="admin-link">📜 Historique</a>
         <?php endif; ?>
     </div>
 

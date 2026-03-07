@@ -3,8 +3,6 @@
 require_once 'includes/auth.php';
 require_once 'config/db.php';
 
-$peut_editer = ($_SESSION['can_edit'] === 1);
-
 try {
     $pdo->exec("ALTER TABLE materiels ADD COLUMN fournisseur TEXT DEFAULT ''");
 } catch (PDOException $e) {

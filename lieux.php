@@ -3,8 +3,6 @@
 require_once 'includes/auth.php';
 require_once 'config/db.php';
 
-$peut_editer = ($_SESSION['can_edit'] === 1);
-
 // RECUPERATION DYNAMIQUE DES PARAMETRES
 $liste_types = [];
 $liste_icones = [];
@@ -29,7 +27,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'supprimer_lieu') {
         if (trim($_POST['confirmation_text']) === 'CONFIRMER') {
-            $pdo->prepare("DELETE FROM lieux_stockage WHERE id = :id")->execute(['id' => (int) $_POST['lieu_id']]);
+            $id_del = (int) $_POST['lieu_id'];
+            
+            // Récupération du nom pour l'historique
+            $nom_lieu = $pdo->query("SELECT nom FROM lieux_stockage WHERE id = $id_del")->fetchColumn();
+            
+            $pdo->prepare("DELETE FROM lieux_stockage WHERE id = :id")->execute(['id' => $id_del]);
+            
+            logAction($pdo, "A supprimé le lieu de stockage : " . ($nom_lieu ?: "ID $id_del")); // NOUVEAU
             $_SESSION['flash_success'] = "🗑️ Le stockage a été définitivement supprimé.";
         } else {
             $_SESSION['flash_error'] = "⚠️ Confirmation invalide.";
@@ -43,6 +48,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($nom) && !empty($_POST['type'])) {
             $pdo->prepare("INSERT INTO lieux_stockage (nom, type, icone, est_reserve) VALUES (?, ?, ?, ?)")
                 ->execute([$nom, $_POST['type'], $_POST['icone'], isset($_POST['est_reserve']) ? 1 : 0]);
+            
+            logAction($pdo, "A créé le lieu de stockage : $nom"); // NOUVEAU
             $_SESSION['flash_success'] = "✅ Le nouveau stockage a été créé !";
         }
         header("Location: lieux.php");
@@ -55,6 +62,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($id > 0 && !empty($nom)) {
             $pdo->prepare("UPDATE lieux_stockage SET nom = ?, type = ?, icone = ?, est_reserve = ? WHERE id = ?")
                 ->execute([$nom, $_POST['type'], $_POST['icone'], isset($_POST['est_reserve']) ? 1 : 0, $id]);
+            
+            logAction($pdo, "A modifié les paramètres du lieu : $nom"); // NOUVEAU
             $_SESSION['flash_success'] = "✅ Paramètres mis à jour !";
         }
         header("Location: lieux.php?id=" . $id);

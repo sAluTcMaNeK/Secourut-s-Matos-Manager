@@ -4,7 +4,6 @@ require_once 'includes/auth.php';
 require_once 'config/db.php';
 
 $lieu_id = isset($_GET['lieu_id']) ? (int) $_GET['lieu_id'] : 0;
-$peut_editer = ($_SESSION['can_edit'] === 1);
 
 // ==========================================
 // TRAITEMENT DES FORMULAIRES (PATTERN PRG)

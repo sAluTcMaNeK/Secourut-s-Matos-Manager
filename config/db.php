@@ -74,4 +74,14 @@ function deduireDeLaReserve($pdo, $materiel_id, $quantite_requise)
         }
     }
 }
+// ==========================================
+// FONCTION GLOBALE : ENREGISTRER UNE ACTION
+// ==========================================
+function logAction($pdo, $action_texte) {
+    $user = $_SESSION['username'] ?? 'Système';
+    try {
+        $stmt = $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))");
+        $stmt->execute([$user, $action_texte]);
+    } catch(PDOException $e) {}
+}
 ?>

@@ -5,7 +5,6 @@ require_once 'config/db.php';
 
 $event_id = isset($_GET['event_id']) ? (int) $_GET['event_id'] : 0;
 $lieu_id = isset($_GET['lieu_id']) ? (int) $_GET['lieu_id'] : 0;
-$peut_editer = ($_SESSION['can_edit'] === 1);
 
 if (!$peut_editer) {
     $_SESSION['flash_error'] = "🛑 Vous n'avez pas les droits pour effectuer une vérification.";

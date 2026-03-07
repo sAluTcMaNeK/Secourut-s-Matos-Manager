@@ -4,7 +4,6 @@ require_once 'includes/auth.php';
 require_once 'config/db.php';
 
 // --- NOUVEAU : Vérification des droits ---
-$peut_editer = ($_SESSION['can_edit'] === 1);
 $est_admin = (isset($_SESSION['role']) && $_SESSION['role'] === 'admin');
 
 $action = $_GET['action'] ?? 'dashboard';
@@ -34,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Suppression en cascade (l'événement et ses liaisons de sacs)
             $pdo->prepare("DELETE FROM evenements WHERE id = ?")->execute([$event_id]);
             $pdo->prepare("DELETE FROM evenements_lieux WHERE evenement_id = ?")->execute([$event_id]);
+            logAction($pdo, "A supprimé le DPS : $nom_event");
 
             $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")
                 ->execute([$_SESSION['username'], "A supprimé le DPS : $nom_event"]);
@@ -57,6 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt_liaison->execute([$event_id, $lieu_id]);
                 }
                 $_SESSION['flash_success'] = "✅ Le DPS '$nom_event' a été créé.";
+                logAction($pdo, "A créé le DPS : $nom_event");
             } else {
                 $_SESSION['flash_error'] = "⚠️ Veuillez remplir tous les champs et sélectionner au moins un sac.";
             }
@@ -97,6 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $_SESSION['flash_success'] = "✏️ Le DPS a été mis à jour.";
+                logAction($pdo, "A modifié le DPS : $nom_event");
             } else {
                 $_SESSION['flash_error'] = "⚠️ La modification a échoué : des champs étaient vides.";
             }

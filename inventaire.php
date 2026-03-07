@@ -6,7 +6,6 @@ require_once 'config/db.php';
 $message = '';
 $action = $_GET['action'] ?? 'resume';
 $lieu_id = isset($_GET['lieu_id']) ? (int) $_GET['lieu_id'] : 0;
-$peut_editer = ($_SESSION['can_edit'] === 1);
 
 $stmt_actif = $pdo->query("SELECT * FROM inventaires WHERE statut = 'en_cours' ORDER BY id DESC LIMIT 1");
 $inventaire_actif = $stmt_actif->fetch();
@@ -32,6 +31,7 @@ if ($action === 'export_xls') {
 
 if ($action === 'lancer' && !$inventaire_actif && $peut_editer) {
     $pdo->exec("INSERT INTO inventaires (date_debut) VALUES (datetime('now', 'localtime'))");
+    logAction($pdo, "A lancé un nouvel inventaire global");
     header("Location: inventaire.php");
     exit;
 }
@@ -39,6 +39,7 @@ if ($action === 'lancer' && !$inventaire_actif && $peut_editer) {
 if ($action === 'cloturer' && $inventaire_actif && $peut_editer) {
     $stmt = $pdo->prepare("UPDATE inventaires SET statut = 'termine', date_fin = datetime('now', 'localtime') WHERE id = ?");
     $stmt->execute([$inventaire_actif['id']]);
+    logAction($pdo, "A clôturé l'inventaire global");
     header("Location: inventaire.php?msg=cloture");
     exit;
 }
@@ -137,6 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_lieu']) && $i
         }
     }
     $pdo->prepare("INSERT OR IGNORE INTO inventaires_lieux (inventaire_id, lieu_id) VALUES (?, ?)")->execute([$inv_id, $lieu_id]);
+    logAction($pdo, "A inventorié le lieu : " . $lieu_info['nom']);
     header("Location: inventaire.php?msg=lieu_valide");
     exit;
 }
@@ -246,7 +248,8 @@ if ($action === 'rapport') {
                     résumé</a>
                 <h2 class="page-title mt-10">📊 Rapport d'inventaire</h2>
                 <p class="mt-5 mb-0 text-muted font-italic">Clôturé le
-                    <?php echo date('d/m/Y à H:i', strtotime($inv['date_fin'])); ?></p>
+                    <?php echo date('d/m/Y à H:i', strtotime($inv['date_fin'])); ?>
+                </p>
             </div>
             <div class="no-print flex-center">
                 <a href="inventaire.php?action=export_xls" class="btn btn-success-dark">📥 Export Excel</a>
@@ -276,7 +279,8 @@ if ($action === 'rapport') {
                         $signe = $ecart > 0 ? '+' : ''; ?>
                         <tr>
                             <td class="font-bold" style="border-right: 1px solid #eee;">
-                                <?php echo $d['lieu_icone'] . ' ' . htmlspecialchars($d['lieu_nom']); ?></td>
+                                <?php echo $d['lieu_icone'] . ' ' . htmlspecialchars($d['lieu_nom']); ?>
+                            </td>
                             <td style="border-right: 1px solid #eee;"><?php echo htmlspecialchars($d['materiel_nom']); ?></td>
                             <td class="text-center text-muted" style="border-right: 1px solid #eee;"><?php echo $d['qte_avant']; ?>
                             </td>
@@ -301,7 +305,8 @@ if ($action === 'rapport') {
                 <div style="page-break-inside: avoid; margin-bottom: 20px;">
                     <h4
                         style="background-color: #e0e0e0; color: #333; padding: 8px 15px; border-radius: 4px 4px 0 0; margin: 0; font-size: 15px; border: 1px solid #ccc; border-bottom: none;">
-                        <?php echo htmlspecialchars($articles[0]['lieu_icone'] . ' ' . $lieu_nom); ?></h4>
+                        <?php echo htmlspecialchars($articles[0]['lieu_icone'] . ' ' . $lieu_nom); ?>
+                    </h4>
                     <table class="table-manager mb-10" style="border: 1px solid #ccc;">
                         <thead>
                             <tr>
@@ -315,9 +320,11 @@ if ($action === 'rapport') {
                             <?php foreach ($articles as $art): ?>
                                 <tr>
                                     <td class="text-sm" style="border-right: 1px solid #eee;">
-                                        <?php echo htmlspecialchars($art['categorie_nom']); ?></td>
+                                        <?php echo htmlspecialchars($art['categorie_nom']); ?>
+                                    </td>
                                     <td class="text-sm font-bold" style="border-right: 1px solid #eee;">
-                                        <?php echo htmlspecialchars($art['materiel_nom']); ?></td>
+                                        <?php echo htmlspecialchars($art['materiel_nom']); ?>
+                                    </td>
                                     <td class="text-center text-sm text-muted" style="border-right: 1px solid #eee;">
                                         <?php echo $art['date_peremption'] ? date('d/m/Y', strtotime($art['date_peremption'])) : '-'; ?>
                                     </td>
@@ -377,7 +384,8 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                     menu</a>
                 <h2 class="page-title mt-5">📋 Pointage : <?php echo htmlspecialchars($lieu['nom']); ?>
                     <?php if ($est_reserve)
-                        echo '<span class="badge badge-reserve ml-10">📦 RÉSERVE</span>'; ?></h2>
+                        echo '<span class="badge badge-reserve ml-10">📦 RÉSERVE</span>'; ?>
+                </h2>
             </div>
             <div class="flex-center">
                 <div class="p-10 border-radius-4 text-center" style="background: #e8f5e9; border: 1px solid #c8e6c9;">
@@ -402,7 +410,8 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                     <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
                     <h3 class="category-header"
                         style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                        <?php echo htmlspecialchars($categorie); ?></h3>
+                        <?php echo htmlspecialchars($categorie); ?>
+                    </h3>
 
                     <table class="table-manager">
                         <thead>
@@ -633,7 +642,7 @@ else {
         </div>
         <?php if ($dernier_inv): ?>
             <a href="inventaire.php?action=rapport&id=<?php echo $dernier_inv['id']; ?>"
-                class="white-box flex-1 text-center mb-0"
+                class="carte-animee white-box flex-1 text-center mb-0"
                 style="text-decoration: none; border-bottom: 4px solid #f1c40f; display: block;">
                 <div class="text-sm text-muted" style="text-transform: uppercase;">Dernier pointage</div>
                 <div class="font-bold text-xl mt-15 mb-15 text-warning"><?php echo $date_affichage; ?></div>
@@ -651,7 +660,7 @@ else {
     <?php if ($peut_editer): ?>
         <div class="text-center mb-30"><a href="inventaire.php?action=lancer"
                 onclick="return confirm('Êtes-vous sûr de vouloir lancer un nouvel inventaire global ?');"
-                class="btn btn-danger-dark btn-lg">FAIRE L'INVENTAIRE</a></div>
+                class="btn btn-danger-dark btn-lg carte-animee">FAIRE L'INVENTAIRE</a></div>
     <?php endif; ?>
 
     <div class="white-box">
@@ -664,7 +673,8 @@ else {
                     <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
                     <h3 class="category-header"
                         style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                        <?php echo htmlspecialchars($categorie); ?></h3>
+                        <?php echo htmlspecialchars($categorie); ?>
+                    </h3>
                     <table class="table-manager" style="border: 1px solid #eee;">
                         <thead>
                             <tr>
@@ -682,7 +692,8 @@ else {
                                     <td class="font-bold text-dark" style="border-right: 1px solid #eee;">
                                         <?php echo htmlspecialchars($nom_mat); ?>
                                         <div class="text-sm text-muted mt-5">Total dispo :
-                                            <strong><?php echo $somme_totale_objet; ?></strong></div>
+                                            <strong><?php echo $somme_totale_objet; ?></strong>
+                                        </div>
                                     </td>
                                     <td class="text-md text-muted">
                                         <div class="flex-row-sm"><?php foreach ($lieux as $l): ?><span class="badge"

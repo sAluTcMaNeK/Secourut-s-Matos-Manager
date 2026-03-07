@@ -55,4 +55,11 @@ if ($_SESSION['can_view'] === 0 && !in_array($page_actuelle, $pages_autorisees))
     header("Location: attente.php");
     exit;
 }
+// Sécurité : Si la permission n'est pas définie (vieux comptes ou mode lecture), on la force à 0
+if (!isset($_SESSION['can_edit'])) {
+    $_SESSION['can_edit'] = 0;
+}
+
+// On crée une variable GLOBALE pour toutes les pages
+$peut_editer = ($_SESSION['can_edit'] == 1 || (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'));
 ?>

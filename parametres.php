@@ -16,6 +16,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $nom = trim($_POST['nom']);
             if (!empty($nom)) {
                 $pdo->prepare("INSERT INTO categories (nom, couleur_fond, couleur_texte) VALUES (?, ?, ?)")->execute([$nom, $_POST['couleur_fond'], $_POST['couleur_texte']]);
+
+                logAction($pdo, "A ajouté la catégorie : $nom"); // NOUVEAU
                 $_SESSION['flash_success'] = "✅ Catégorie '$nom' ajoutée.";
             }
         } elseif ($action === 'edit_cat') {
@@ -23,20 +25,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $nom = trim($_POST['nom']);
             if (!empty($nom) && $id > 0) {
                 $pdo->prepare("UPDATE categories SET nom = ?, couleur_fond = ?, couleur_texte = ? WHERE id = ?")->execute([$nom, $_POST['couleur_fond'], $_POST['couleur_texte'], $id]);
+
+                logAction($pdo, "A modifié la catégorie : $nom"); // NOUVEAU
                 $_SESSION['flash_success'] = "✏️ Catégorie mise à jour.";
             }
         } elseif ($action === 'delete_cat') {
             $id = (int) $_POST['id'];
+            $nom_cat = $pdo->query("SELECT nom FROM categories WHERE id = $id")->fetchColumn();
+
             if ($pdo->prepare("SELECT COUNT(*) FROM materiels WHERE categorie_id = ?")->execute([$id]) > 0) {
                 $_SESSION['flash_error'] = "❌ Impossible : Catégorie non vide.";
             } else {
                 $pdo->prepare("DELETE FROM categories WHERE id = ?")->execute([$id]);
+
+                logAction($pdo, "A supprimé la catégorie : " . ($nom_cat ?: "ID $id")); // NOUVEAU
                 $_SESSION['flash_success'] = "🗑️ Catégorie supprimée.";
             }
         } elseif ($action === 'add_type') {
             $nom = trim($_POST['nom']);
             if (!empty($nom)) {
                 $pdo->prepare("INSERT INTO types_lieux (nom) VALUES (?)")->execute([$nom]);
+
+                logAction($pdo, "A ajouté le type de stockage : $nom"); // NOUVEAU
                 $_SESSION['flash_success'] = "✅ Nouveau type ajouté.";
             }
         } elseif ($action === 'edit_type') {
@@ -44,18 +54,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $nom = trim($_POST['nom']);
             if (!empty($nom) && $id > 0) {
                 $pdo->prepare("UPDATE types_lieux SET nom = ? WHERE id = ?")->execute([$nom, $id]);
+
+                logAction($pdo, "A modifié le type de stockage : $nom"); // NOUVEAU
                 $_SESSION['flash_success'] = "✏️ Type de stockage mis à jour.";
             }
         } elseif ($action === 'delete_type') {
-            $pdo->prepare("DELETE FROM types_lieux WHERE id = ?")->execute([(int) $_POST['id']]);
+            $id = (int) $_POST['id'];
+            $nom_type = $pdo->query("SELECT nom FROM types_lieux WHERE id = $id")->fetchColumn();
+
+            $pdo->prepare("DELETE FROM types_lieux WHERE id = ?")->execute([$id]);
+
+            logAction($pdo, "A supprimé le type de stockage : " . ($nom_type ?: "ID $id")); // NOUVEAU
             $_SESSION['flash_success'] = "🗑️ Type supprimé.";
+
         } elseif ($action === 'add_icone') {
             if (!empty($_POST['icone'])) {
                 $pdo->prepare("INSERT INTO icones_lieux (icone) VALUES (?)")->execute([trim($_POST['icone'])]);
+
+                logAction($pdo, "A ajouté l'icône : " . trim($_POST['icone'])); // NOUVEAU
                 $_SESSION['flash_success'] = "✅ Icône ajoutée.";
             }
         } elseif ($action === 'delete_icone') {
-            $pdo->prepare("DELETE FROM icones_lieux WHERE id = ?")->execute([(int) $_POST['id']]);
+            $id = (int) $_POST['id'];
+            $icone = $pdo->query("SELECT icone FROM icones_lieux WHERE id = $id")->fetchColumn();
+
+            $pdo->prepare("DELETE FROM icones_lieux WHERE id = ?")->execute([$id]);
+
+            logAction($pdo, "A supprimé l'icône : " . ($icone ?: "ID $id")); // NOUVEAU
             $_SESSION['flash_success'] = "🗑️ Icône supprimée.";
         }
     } catch (PDOException $e) {
