@@ -65,6 +65,21 @@ function toggleEdit(id, isEditing) {
     } else {
         viewElems.forEach(el => el.style.display = el.tagName.toLowerCase() === 'div' ? 'flex' : 'inline-block');
         editElems.forEach(el => el.style.display = 'none');
+
+        // On cache la ligne de prélèvement de la réserve si on annule l'édition
+        let refillRow = document.getElementById('edit-refill-' + id);
+        if (refillRow) {
+            refillRow.style.display = 'none';
+            let selectLot = refillRow.querySelector('.input-reserve-lot');
+            if (selectLot) selectLot.value = '';
+        }
+
+        // On réinitialise la quantité à son état d'origine
+        let qtyInput = document.querySelector('.edit-mode-' + id + '.input-edit-qty');
+        if (qtyInput) {
+            qtyInput.value = qtyInput.getAttribute('data-old');
+            qtyInput.style.borderColor = '#ccc';
+        }
     }
 }
 
@@ -216,6 +231,7 @@ document.addEventListener('DOMContentLoaded', function () {
         checkDifferenceVerif(input);
     });
 });
+
 // ==========================================
 // 4. PAGE : GESTION SAC (gestion_sac.php)
 // ==========================================
@@ -270,6 +286,66 @@ function toggleManualDate(val) {
             }
         }
     }
+}
+
+// Nouvelles fonctions pour l'édition "en ligne" dans gestion_sac.php
+function checkEditDifference(input, id, isReserve) {
+    if (isReserve) return;
+
+    let oldQty = parseInt(input.getAttribute('data-old'));
+    let newQty = parseInt(input.value);
+    if (isNaN(newQty)) newQty = 0;
+
+    let refillRow = document.getElementById('edit-refill-' + id);
+    if (!refillRow) return;
+
+    let diffDisplay = refillRow.querySelector('.diff-display');
+    let selectLot = refillRow.querySelector('.input-reserve-lot');
+
+    if (newQty > oldQty) {
+        refillRow.style.display = 'table-row';
+        if (diffDisplay) diffDisplay.textContent = newQty - oldQty;
+    } else {
+        refillRow.style.display = 'none';
+        if (selectLot) {
+            selectLot.value = '';
+            selectLot.style.borderColor = '#ccc';
+        }
+    }
+}
+
+function updateEditMaxQty(selectElement, id) {
+    const selectedOption = selectElement.options[selectElement.selectedIndex];
+    const max = selectedOption.getAttribute('data-max');
+    let qtyInput = document.querySelector('.edit-mode-' + id + '.input-edit-qty');
+    let oldQty = parseInt(qtyInput.getAttribute('data-old'));
+
+    if (selectElement.value !== 'manual' && selectElement.value !== '') {
+        let diff = parseInt(qtyInput.value) - oldQty;
+        if (max && diff > parseInt(max)) {
+            qtyInput.value = oldQty + parseInt(max);
+            alert("Attention : Le lot sélectionné ne contient que " + max + " unités.");
+            checkEditDifference(qtyInput, id, false);
+        }
+    }
+    selectElement.style.borderColor = '#ccc';
+}
+
+function validateEdit(id, isReserve) {
+    if (isReserve) return true;
+    let qtyInput = document.querySelector('.edit-mode-' + id + '.input-edit-qty');
+    let oldQty = parseInt(qtyInput.getAttribute('data-old'));
+    let newQty = parseInt(qtyInput.value);
+
+    if (newQty > oldQty) {
+        let selectLot = document.querySelector('#edit-refill-' + id + ' .input-reserve-lot');
+        if (selectLot && selectLot.value === "") {
+            selectLot.style.borderColor = '#f44336';
+            alert("⚠️ Veuillez sélectionner une réserve pour justifier d'où provient l'ajout de matériel.");
+            return false;
+        }
+    }
+    return true;
 }
 
 // ==========================================

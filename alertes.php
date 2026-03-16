@@ -15,7 +15,7 @@ $stmt_peremption = $pdo->query("
     JOIN lieux_stockage l ON s.lieu_id = l.id
     WHERE s.date_peremption IS NOT NULL 
       AND s.date_peremption != '' 
-      AND s.date_peremption <= date('now', '+30 days')
+      AND s.date_peremption <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
     ORDER BY s.date_peremption ASC
 ");
 $alertes_peremption = $stmt_peremption->fetchAll();

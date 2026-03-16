@@ -5,7 +5,6 @@ $role_utilisateur = htmlspecialchars($_SESSION['role'] ?? '');
 $est_admin = ($role_utilisateur === 'admin');
 
 // --- CHARGEMENT DYNAMIQUE DES COULEURS ---
-// On met en cache les couleurs des catégories pour éviter de faire 50 requêtes SQL
 global $pdo;
 $db_categories = [];
 if (isset($pdo)) {
@@ -17,19 +16,17 @@ if (isset($pdo)) {
                 'text' => $row['couleur_texte'] ?? 'white'
             ];
         }
-    } catch (Exception $e) { }
+    } catch (Exception $e) {
+    }
 }
 
-function getCouleurCategorie($nom_categorie) {
+function getCouleurCategorie($nom_categorie)
+{
     global $db_categories;
     $nom = strtolower(trim($nom_categorie));
-    
-    // Si la catégorie existe en base avec une couleur, on la prend
     if (isset($db_categories[$nom]) && !empty($db_categories[$nom]['bg'])) {
         return ['bg' => $db_categories[$nom]['bg'], 'text' => $db_categories[$nom]['text']];
     }
-    
-    // Sinon, couleur par défaut
     return ['bg' => '#2c3e50', 'text' => 'white'];
 }
 ?>
@@ -38,7 +35,7 @@ function getCouleurCategorie($nom_categorie) {
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Secourut's Matos Manager</title>
     <link rel="icon" href="assets/img/favicon.png" type="image/png">
     <link rel="stylesheet" href="assets/css/style.css">
@@ -58,7 +55,7 @@ function getCouleurCategorie($nom_categorie) {
         <a href="lieux.php">🎒 Sacs & Réserves</a>
         <a href="remplissage.php">🚑 Vérification DPS</a>
         <a href="inventaire.php">📋 Faire l'inventaire</a>
-        
+
         <?php if ($est_admin): ?>
             <a href="parametres.php" style="margin-top: 15px;" class="admin-link">⚙️ Paramètres</a>
             <a href="utilisateurs.php" class="admin-link">👥 Utilisateurs</a>
@@ -96,4 +93,18 @@ function getCouleurCategorie($nom_categorie) {
                     unset($_SESSION['flash_error']); ?>
                 </div>
             <?php endif; ?>
-<script src="assets/js/script.js"></script>
+
+            <script>
+                function toggleMenu() {
+                    const sidebar = document.getElementById('sidebar');
+                    const overlay = document.getElementById('overlay');
+                    if (sidebar && overlay) {
+                        sidebar.classList.toggle('ouvert');
+                        overlay.classList.toggle('actif');
+                    }
+                }
+            </script>
+
+            <?php if (file_exists('assets/js/script.js')): ?>
+                <script src="assets/js/script.js"></script>
+            <?php endif; ?>

@@ -3,22 +3,11 @@
 require_once 'includes/auth.php';
 require_once 'config/db.php';
 
-// --- 1. CRÉATION DE LA TABLE HISTORIQUE (Si elle n'existe pas) ---
-try {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS historique_actions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nom_utilisateur TEXT,
-        action TEXT,
-        date_action DATETIME DEFAULT CURRENT_TIMESTAMP
-    )");
-} catch (PDOException $e) {
-}
-
 // --- 2. CALCUL DES ALERTES ---
-$stmt_peremption = $pdo->query("SELECT COUNT(*) as alertes FROM stocks WHERE date_peremption IS NOT NULL AND date_peremption != '' AND date_peremption <= date('now', '+30 days')");
+$stmt_peremption = $pdo->query("SELECT COUNT(*) as alertes FROM stocks WHERE date_peremption IS NOT NULL AND date_peremption != '' AND date_peremption <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)");
 $nb_alertes_peremption = $stmt_peremption->fetch()['alertes'];
 
-$stmt_stocks_faibles = $pdo->query("SELECT COUNT(*) as alertes FROM (SELECT m.id, m.seuil_alerte, SUM(IFNULL(s.quantite, 0)) as total_stock FROM materiels m LEFT JOIN stocks s ON m.id = s.materiel_id GROUP BY m.id HAVING total_stock <= m.seuil_alerte AND m.seuil_alerte > 0)");
+$stmt_stocks_faibles = $pdo->query("SELECT COUNT(*) as alertes FROM (SELECT m.id, m.seuil_alerte, SUM(IFNULL(s.quantite, 0)) as total_stock FROM materiels m LEFT JOIN stocks s ON m.id = s.materiel_id GROUP BY m.id HAVING total_stock <= m.seuil_alerte AND m.seuil_alerte > 0) AS sous_requete");
 $nb_alertes_stock = $stmt_stocks_faibles->fetch()['alertes'];
 
 // --- 3. RECHERCHE DU DERNIER INVENTAIRE TERMINÉ ---
@@ -75,30 +64,32 @@ require_once 'includes/header.php';
         <p style="color: #999; font-style: italic; text-align: center; padding: 20px;">Aucune action récente n'a été
             enregistrée pour le moment.</p>
     <?php else: ?>
-        <table class="table-manager">
-            <thead>
-                <tr>
-                    <th style="width: 20%;">Date & Heure</th>
-                    <th style="width: 20%;">Utilisateur</th>
-                    <th style="width: 60%;">Action effectuée</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($historique as $log): ?>
-                    <tr style="border-bottom: 1px solid #eee;">
-                        <td style="color: #666; font-size: 13px;">
-                            <?php echo date('d/m/Y à H:i', strtotime($log['date_action'])); ?>
-                        </td>
-                        <td style="font-weight: bold; color: #2c3e50; font-size: 14px;">
-                            👤 <?php echo htmlspecialchars($log['nom_utilisateur']); ?>
-                        </td>
-                        <td style="color: #444; font-size: 14px;">
-                            <?php echo htmlspecialchars($log['action']); ?>
-                        </td>
+        <div class="table-responsive">
+            <table class="table-manager">
+                <thead>
+                    <tr>
+                        <th style="width: 20%;">Date & Heure</th>
+                        <th style="width: 20%;">Utilisateur</th>
+                        <th style="width: 60%;">Action effectuée</th>
                     </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    <?php foreach ($historique as $log): ?>
+                        <tr style="border-bottom: 1px solid #eee;">
+                            <td style="color: #666; font-size: 13px;">
+                                <?php echo date('d/m/Y à H:i', strtotime($log['date_action'])); ?>
+                            </td>
+                            <td style="font-weight: bold; color: #2c3e50; font-size: 14px;">
+                                👤 <?php echo htmlspecialchars($log['nom_utilisateur']); ?>
+                            </td>
+                            <td style="color: #444; font-size: 14px;">
+                                <?php echo htmlspecialchars($log['action']); ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
     <?php endif; ?>
 </div>
 

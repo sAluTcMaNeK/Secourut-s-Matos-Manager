@@ -4,7 +4,7 @@ require_once 'config/db.php';
 
 // Tes identifiants (tu peux changer le mot de passe ici avant d'envoyer le fichier)
 $nom_utilisateur = 'admin';
-$mot_de_passe_en_clair = 'admin'; 
+$mot_de_passe_en_clair = 'secouruts60@mde'; 
 $role = 'admin';
 
 // Le chiffrage sécurisé du mot de passe

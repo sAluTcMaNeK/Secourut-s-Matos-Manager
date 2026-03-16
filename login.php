@@ -4,10 +4,6 @@ session_start();
 require_once 'vendor/autoload.php';
 require_once 'config/db.php';
 
-// 1. CHARGEMENT DES VARIABLES D'ENVIRONNEMENT (.env)
-$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
-$dotenv->safeLoad();
-
 // Si déjà connecté, on redirige vers l'accueil
 if (isset($_SESSION['user_id'])) {
     header("Location: index.php");
@@ -67,9 +63,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // 2. CONFIGURATION DU FOURNISSEUR OAUTH2
 // =========================================================
 $provider = new \League\OAuth2\Client\Provider\GenericProvider([
-    'clientId' => $_SERVER['OAUTH_CLIENT_ID'] ?? '',
-    'clientSecret' => $_SERVER['OAUTH_CLIENT_SECRET'] ?? '',
-    'redirectUri' => 'http://secourutsmatos.alwaysdata.net/login.php', // A CHANGER PAR TON VRAI LIEN EXACT
+    'clientId' => $_ENV['SECOURUTS_OAUTH_CLIENT_ID'],
+    'clientSecret' => $_ENV['SECOURUTS_OAUTH_CLIENT_SECRET'],
+    'redirectUri' => 'https://assos.utc.fr/secouruts/intranet/login.php', // A CHANGER PAR TON VRAI LIEN EXACT
     'urlAuthorize' => 'https://auth.assos.utc.fr/oauth/authorize',
     'urlAccessToken' => 'https://auth.assos.utc.fr/oauth/token',
     'urlResourceOwnerDetails' => 'https://auth.assos.utc.fr/api/user',

@@ -4,6 +4,7 @@ require_once 'includes/auth.php';
 require_once 'config/db.php';
 
 $lieu_id = isset($_GET['lieu_id']) ? (int) $_GET['lieu_id'] : 0;
+$peut_editer = ($_SESSION['can_edit'] === 1 || (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'));
 
 // ==========================================
 // TRAITEMENT DES FORMULAIRES (PATTERN PRG)
@@ -27,21 +28,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stock_id = (int) $_POST['stock_id'];
             $qty = (int) $_POST['quantite'];
             $date_p = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
+            $reserve_stock_id = $_POST['reserve_stock_id'] ?? '';
 
-            $stmt_mat_nom = $pdo->prepare("SELECT m.nom FROM materiels m JOIN stocks s ON m.id = s.materiel_id WHERE s.id = ?");
-            $stmt_mat_nom->execute([$stock_id]);
-            $nom_mat_edit = $stmt_mat_nom->fetchColumn() ?: "Objet";
+            $stmt_current = $pdo->prepare("SELECT s.quantite, s.materiel_id, m.nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id WHERE s.id = ?");
+            $stmt_current->execute([$stock_id]);
+            $current = $stmt_current->fetch();
+            $nom_mat_edit = $current ? $current['nom'] : "Objet";
+            $old_qty = $current ? $current['quantite'] : 0;
 
             if ($qty <= 0) {
                 $pdo->prepare("DELETE FROM stocks WHERE id = :id")->execute(['id' => $stock_id]);
                 $action_texte = "A retiré l'objet '" . $nom_mat_edit . "' du lieu : " . $nom_du_lieu;
                 $_SESSION['flash_success'] = "✅ Objet retiré du stockage.";
             } else {
+                $action_suffix = "";
+
+                // GESTION DU SURPLUS DEPUIS LA RÉSERVE (uniquement si ce n'est pas une réserve)
+                if ($qty > $old_qty && !$est_res_dest) {
+                    $diff = $qty - $old_qty;
+
+                    if (is_numeric($reserve_stock_id)) {
+                        $stmt_res = $pdo->prepare("SELECT id, quantite, lieu_id FROM stocks WHERE id = ?");
+                        $stmt_res->execute([$reserve_stock_id]);
+                        $reserve_lot = $stmt_res->fetch();
+
+                        if ($reserve_lot) {
+                            if ($reserve_lot['quantite'] <= $diff) {
+                                $pdo->prepare("DELETE FROM stocks WHERE id = ?")->execute([$reserve_lot['id']]);
+                            } else {
+                                $pdo->prepare("UPDATE stocks SET quantite = quantite - ? WHERE id = ?")->execute([$diff, $reserve_lot['id']]);
+                            }
+                            $nom_res = $pdo->query("SELECT nom FROM lieux_stockage WHERE id = " . $reserve_lot['lieu_id'])->fetchColumn() ?: 'Réserve';
+                            $action_suffix = " (Ajout de +$diff prélevé dans : $nom_res)";
+                        }
+                    } elseif ($reserve_stock_id === 'manual') {
+                        $action_suffix = " (Ajout de +$diff via correction manuelle hors base)";
+                    } else {
+                        $_SESSION['flash_error'] = "❌ Vous devez sélectionner une réserve pour justifier d'où provient le matériel ajouté.";
+                        header("Location: gestion_sac.php?lieu_id=" . $lieu_id);
+                        exit;
+                    }
+                }
+
+                // On met à jour la quantité du sac
                 $pdo->prepare("UPDATE stocks SET quantite = :qty, date_peremption = :dp WHERE id = :id")->execute(['qty' => $qty, 'dp' => $date_p, 'id' => $stock_id]);
-                $action_texte = "A mis à jour la quantité de '" . $nom_mat_edit . "' (Lieu : " . $nom_du_lieu . ")";
+
+                // Préparation de l'historique
+                if ($qty < $old_qty) {
+                    $diff = $old_qty - $qty;
+                    $action_texte = "A réduit la quantité de '" . $nom_mat_edit . "' (-$diff) (Lieu : " . $nom_du_lieu . ")";
+                } elseif ($qty > $old_qty) {
+                    $action_texte = "A augmenté la quantité de '" . $nom_mat_edit . "' (Lieu : " . $nom_du_lieu . ")" . $action_suffix;
+                } else {
+                    $action_texte = "A mis à jour la péremption de '" . $nom_mat_edit . "' (Lieu : " . $nom_du_lieu . ")";
+                }
                 $_SESSION['flash_success'] = "✅ Quantité mise à jour.";
             }
-            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+            if (function_exists('logAction'))
+                logAction($pdo, $action_texte);
+            else
+                $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
 
         } elseif ($action === 'delete_stock') {
             $stock_id = (int) $_POST['stock_id'];
@@ -50,7 +96,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $nom_mat_del = $stmt_mat_nom->fetchColumn() ?: "Objet";
 
             $pdo->prepare("DELETE FROM stocks WHERE id = :id")->execute(['id' => $stock_id]);
-            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], "A supprimé définitivement '" . $nom_mat_del . "' (Lieu : " . $nom_du_lieu . ")"]);
+            if (function_exists('logAction'))
+                logAction($pdo, "A supprimé définitivement '" . $nom_mat_del . "' (Lieu : " . $nom_du_lieu . ")");
             $_SESSION['flash_success'] = "🗑️ L'objet a été retiré du sac.";
 
         } elseif ($action === 'add_stock') {
@@ -91,7 +138,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $nom_mat = $pdo->query("SELECT nom FROM materiels WHERE id = $materiel_id")->fetchColumn() ?: "Objet";
-                $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], "A ajouté $quantite x $nom_mat dans : $nom_du_lieu" . $action_suffix]);
+                if (function_exists('logAction'))
+                    logAction($pdo, "A ajouté $quantite x $nom_mat dans : $nom_du_lieu" . $action_suffix);
                 $_SESSION['flash_success'] = "➕ Matériel inséré avec succès.";
             }
         }
@@ -119,7 +167,9 @@ if (!$lieu) {
 }
 $est_reserve = $lieu['est_reserve'] == 1;
 $materiels = $pdo->query("SELECT id, nom FROM materiels ORDER BY nom")->fetchAll();
-$stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.quantite, s.date_peremption, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom, s.date_peremption");
+
+// AJOUT DE s.materiel_id POUR LA SELECTION DE RESERVE
+$stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.materiel_id, s.quantite, s.date_peremption, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom, s.date_peremption");
 $stmt_stocks->execute(['lieu_id' => $lieu_id]);
 $stocks = $stmt_stocks->fetchAll();
 
@@ -242,14 +292,16 @@ require_once 'includes/header.php';
                     <tbody>
                         <?php foreach ($articles as $article):
                             $sid = $article['stock_id'];
+                            $mat_id = $article['materiel_id'];
                             $raw_date = $article['date_peremption'];
                             $affichage_date = $raw_date ? date('d/m/Y', strtotime($raw_date)) : '-';
                             ?>
                             <?php if ($peut_editer): ?>
                                 <form id="form-edit-<?php echo $sid; ?>" method="POST"
-                                    action="gestion_sac.php?lieu_id=<?php echo $lieu_id; ?>">
-                                    <input type="hidden" name="action" value="edit_stock"><input type="hidden" name="stock_id"
-                                        value="<?php echo $sid; ?>">
+                                    action="gestion_sac.php?lieu_id=<?php echo $lieu_id; ?>"
+                                    onsubmit="return validateEdit(<?php echo $sid; ?>, <?php echo $est_reserve ? 'true' : 'false'; ?>)">
+                                    <input type="hidden" name="action" value="edit_stock">
+                                    <input type="hidden" name="stock_id" value="<?php echo $sid; ?>">
                                 </form>
                             <?php endif; ?>
 
@@ -266,10 +318,14 @@ require_once 'includes/header.php';
 
                                 <td class="text-center text-xl">
                                     <span class="view-mode-<?php echo $sid; ?> font-bold"><?php echo $article['quantite']; ?></span>
-                                    <?php if ($peut_editer): ?><input class="edit-mode-<?php echo $sid; ?> input-field"
-                                            type="number" form="form-edit-<?php echo $sid; ?>" name="quantite"
-                                            value="<?php echo $article['quantite']; ?>" min="0"
-                                            style="display:none; width: 60px; padding: 5px; text-align: center; margin: 0 auto;"><?php endif; ?>
+                                    <?php if ($peut_editer): ?>
+                                        <input class="edit-mode-<?php echo $sid; ?> input-field input-edit-qty" type="number"
+                                            form="form-edit-<?php echo $sid; ?>" name="quantite"
+                                            value="<?php echo $article['quantite']; ?>" data-old="<?php echo $article['quantite']; ?>"
+                                            min="0"
+                                            oninput="checkEditDifference(this, <?php echo $sid; ?>, <?php echo $est_reserve ? 'true' : 'false'; ?>)"
+                                            style="display:none; width: 60px; padding: 5px; text-align: center; margin: 0 auto;">
+                                    <?php endif; ?>
                                 </td>
 
                                 <?php if ($peut_editer): ?>
@@ -294,6 +350,34 @@ require_once 'includes/header.php';
                                     </td>
                                 <?php endif; ?>
                             </tr>
+
+                            <?php if ($peut_editer && !$est_reserve): ?>
+                                <tr class="edit-refill-row" id="edit-refill-<?php echo $sid; ?>"
+                                    style="display: none; background-color: #fdfaf6; border-bottom: 2px solid #ddd;">
+                                    <td colspan="4" style="padding: 10px 10px 10px 40px; border-left: 4px solid #2c3e50;">
+                                        <div class="flex-center">
+                                            <label class="text-sm font-bold text-dark">L'ajout (+<span
+                                                    class="diff-display text-danger font-bold">0</span>) provient de :</label>
+                                            <select name="reserve_stock_id" form="form-edit-<?php echo $sid; ?>"
+                                                class="input-reserve-lot input-field mb-0" style="width: auto; padding: 5px;"
+                                                onchange="updateEditMaxQty(this, <?php echo $sid; ?>)">
+                                                <option value="">-- Sélectionner une réserve --</option>
+                                                <?php
+                                                $lots = $reserves_par_materiel[$mat_id] ?? [];
+                                                foreach ($lots as $res):
+                                                    $date_format = $res['date_peremption'] ? date('d/m/Y', strtotime($res['date_peremption'])) : 'Aucune';
+                                                    $label = htmlspecialchars($res['lieu_nom']) . " | Pér: " . $date_format . " | Dispo: " . $res['quantite'];
+                                                    ?>
+                                                    <option value="<?php echo $res['reserve_stock_id']; ?>"
+                                                        data-max="<?php echo $res['quantite']; ?>"><?php echo $label; ?></option>
+                                                <?php endforeach; ?>
+                                                <option value="manual">Correction manuelle (Hors base)</option>
+                                            </select>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endif; ?>
+
                         <?php endforeach; ?>
                     </tbody>
                 </table>

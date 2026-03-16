@@ -262,39 +262,44 @@ if ($action === 'rapport') {
         <?php if (empty($diffs)): ?>
             <div class="alert alert-success text-center">Aucune erreur d'inventaire n'a été constatée.</div>
         <?php else: ?>
-            <table class="table-manager mb-30" style="border: 1px solid #ddd;">
-                <thead>
-                    <tr>
-                        <th style="width: 20%;">Lieu</th>
-                        <th style="width: 30%;">Matériel</th>
-                        <th class="text-center" style="width: 10%;">Avant</th>
-                        <th class="text-center" style="width: 10%;">Après</th>
-                        <th class="text-left" style="width: 30%;">Détails</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($diffs as $d):
-                        $ecart = $d['qte_apres'] - $d['qte_avant'];
-                        $couleur_ecart = $ecart > 0 ? '#2e7d32' : '#c62828';
-                        $signe = $ecart > 0 ? '+' : ''; ?>
+            <div class="table-responsive">
+                <table class="table-manager mb-30" style="border: 1px solid #ddd;">
+                    <thead>
                         <tr>
-                            <td class="font-bold" style="border-right: 1px solid #eee;">
-                                <?php echo $d['lieu_icone'] . ' ' . htmlspecialchars($d['lieu_nom']); ?>
-                            </td>
-                            <td style="border-right: 1px solid #eee;"><?php echo htmlspecialchars($d['materiel_nom']); ?></td>
-                            <td class="text-center text-muted" style="border-right: 1px solid #eee;"><?php echo $d['qte_avant']; ?>
-                            </td>
-                            <td class="text-center font-bold" style="border-right: 1px solid #eee;"><?php echo $d['qte_apres']; ?>
-                                <div class="text-sm" style="color: <?php echo $couleur_ecart; ?>;">(<?php echo $signe . $ecart; ?>)
-                                </div>
-                            </td>
-                            <td class="text-sm text-muted">
-                                <?php echo $d['action_corrective'] ? htmlspecialchars($d['action_corrective']) : 'Ajustement manuel'; ?>
-                            </td>
+                            <th style="width: 20%;">Lieu</th>
+                            <th style="width: 30%;">Matériel</th>
+                            <th class="text-center" style="width: 10%;">Avant</th>
+                            <th class="text-center" style="width: 10%;">Après</th>
+                            <th class="text-left" style="width: 30%;">Détails</th>
                         </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($diffs as $d):
+                            $ecart = $d['qte_apres'] - $d['qte_avant'];
+                            $couleur_ecart = $ecart > 0 ? '#2e7d32' : '#c62828';
+                            $signe = $ecart > 0 ? '+' : ''; ?>
+                            <tr>
+                                <td class="font-bold" style="border-right: 1px solid #eee;">
+                                    <?php echo $d['lieu_icone'] . ' ' . htmlspecialchars($d['lieu_nom']); ?>
+                                </td>
+                                <td style="border-right: 1px solid #eee;"><?php echo htmlspecialchars($d['materiel_nom']); ?></td>
+                                <td class="text-center text-muted" style="border-right: 1px solid #eee;">
+                                    <?php echo $d['qte_avant']; ?>
+                                </td>
+                                <td class="text-center font-bold" style="border-right: 1px solid #eee;">
+                                    <?php echo $d['qte_apres']; ?>
+                                    <div class="text-sm" style="color: <?php echo $couleur_ecart; ?>;">
+                                        (<?php echo $signe . $ecart; ?>)
+                                    </div>
+                                </td>
+                                <td class="text-sm text-muted">
+                                    <?php echo $d['action_corrective'] ? htmlspecialchars($d['action_corrective']) : 'Ajustement manuel'; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         <?php endif; ?>
 
         <h3 class="section-title mt-40">📋 Inventaire Détaillé Complet</h3>
@@ -307,32 +312,34 @@ if ($action === 'rapport') {
                         style="background-color: #e0e0e0; color: #333; padding: 8px 15px; border-radius: 4px 4px 0 0; margin: 0; font-size: 15px; border: 1px solid #ccc; border-bottom: none;">
                         <?php echo htmlspecialchars($articles[0]['lieu_icone'] . ' ' . $lieu_nom); ?>
                     </h4>
-                    <table class="table-manager mb-10" style="border: 1px solid #ccc;">
-                        <thead>
-                            <tr>
-                                <th style="width: 25%; border-right: 1px solid #ccc;">Catégorie</th>
-                                <th style="width: 45%; border-right: 1px solid #ccc;">Matériel</th>
-                                <th class="text-center" style="width: 15%; border-right: 1px solid #ccc;">Péremption</th>
-                                <th class="text-center" style="width: 15%;">Quantité</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($articles as $art): ?>
+                    <div class="table-responsive">
+                        <table class="table-manager mb-10" style="border: 1px solid #ccc;">
+                            <thead>
                                 <tr>
-                                    <td class="text-sm" style="border-right: 1px solid #eee;">
-                                        <?php echo htmlspecialchars($art['categorie_nom']); ?>
-                                    </td>
-                                    <td class="text-sm font-bold" style="border-right: 1px solid #eee;">
-                                        <?php echo htmlspecialchars($art['materiel_nom']); ?>
-                                    </td>
-                                    <td class="text-center text-sm text-muted" style="border-right: 1px solid #eee;">
-                                        <?php echo $art['date_peremption'] ? date('d/m/Y', strtotime($art['date_peremption'])) : '-'; ?>
-                                    </td>
-                                    <td class="text-center text-md font-bold"><?php echo $art['quantite']; ?></td>
+                                    <th style="width: 25%; border-right: 1px solid #ccc;">Catégorie</th>
+                                    <th style="width: 45%; border-right: 1px solid #ccc;">Matériel</th>
+                                    <th class="text-center" style="width: 15%; border-right: 1px solid #ccc;">Péremption</th>
+                                    <th class="text-center" style="width: 15%;">Quantité</th>
                                 </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($articles as $art): ?>
+                                    <tr>
+                                        <td class="text-sm" style="border-right: 1px solid #eee;">
+                                            <?php echo htmlspecialchars($art['categorie_nom']); ?>
+                                        </td>
+                                        <td class="text-sm font-bold" style="border-right: 1px solid #eee;">
+                                            <?php echo htmlspecialchars($art['materiel_nom']); ?>
+                                        </td>
+                                        <td class="text-center text-sm text-muted" style="border-right: 1px solid #eee;">
+                                            <?php echo $art['date_peremption'] ? date('d/m/Y', strtotime($art['date_peremption'])) : '-'; ?>
+                                        </td>
+                                        <td class="text-center text-md font-bold"><?php echo $art['quantite']; ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>
@@ -412,101 +419,102 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                         style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
                         <?php echo htmlspecialchars($categorie); ?>
                     </h3>
-
-                    <table class="table-manager">
-                        <thead>
-                            <tr>
-                                <th style="width: 40%;">Matériel</th>
-                                <th class="text-center" style="width: 20%;">Péremption</th>
-                                <th class="text-center" style="width: 20%;">Théorique</th>
-                                <th class="text-center" style="width: 20%;">Compté</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($articles as $art):
-                                $sid = $art['stock_id'];
-                                $theo = $art['quantite'];
-                                $mat_id = $art['materiel_id'];
-                                ?>
-                                <tr class="item-row" data-stock-id="<?php echo $sid; ?>" data-theo="<?php echo $theo; ?>"
-                                    data-etat="vide" style="transition: background-color 0.3s;">
-                                    <td class="font-bold text-dark"><?php echo htmlspecialchars($art['materiel_nom']); ?></td>
-                                    <td class="text-center text-muted text-sm">
-                                        <?php echo $art['date_peremption'] ? date('d/m/Y', strtotime($art['date_peremption'])) : '-'; ?>
-                                    </td>
-                                    <td class="text-center text-lg font-bold text-muted"><?php echo $theo; ?></td>
-                                    <td class="text-center">
-                                        <input type="number" min="0" name="comptage[<?php echo $sid; ?>][counted]"
-                                            class="input-comptage" data-attendu="<?php echo $theo; ?>"
-                                            oninput="checkDifferenceInv(this, <?php echo $est_reserve ? 'true' : 'false'; ?>)"
-                                            placeholder="?"
-                                            style="width: 80px; padding: 10px; font-size: 18px; text-align: center; border: 2px solid #ccc; border-radius: 6px; font-weight: bold; outline: none;">
-                                        <input type="hidden" name="comptage[<?php echo $sid; ?>][materiel_id]"
-                                            value="<?php echo $mat_id; ?>">
-                                    </td>
+                    <div class="table-responsive">
+                        <table class="table-manager">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40%;">Matériel</th>
+                                    <th class="text-center" style="width: 20%;">Péremption</th>
+                                    <th class="text-center" style="width: 20%;">Théorique</th>
+                                    <th class="text-center" style="width: 20%;">Compté</th>
                                 </tr>
-                                <tr class="refill-row" id="refill-<?php echo $sid; ?>"
-                                    style="display: none; background-color: #fdfaf6; border-bottom: 2px solid #ddd;">
-                                    <td colspan="4" style="padding: 10px 10px 10px 40px; border-left: 4px solid #ef6c00;">
-                                        <?php if ($est_reserve): ?>
-                                            <span class="missing-text-reserve text-warning font-bold text-md">↳ Écart constaté.</span>
-                                            <div class="reserve-tools flex-center mt-10 bg-white p-10 border-radius-4"
-                                                style="border: 1px solid #ccc; flex-wrap: wrap;">
-                                                <label class="text-sm font-bold text-dark">Action corrective :</label>
-                                                <select name="comptage[<?php echo $sid; ?>][motif]" class="select-motif-reserve"
-                                                    style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;"
-                                                    onchange="toggleReserveMotif(this)">
-                                                    <option value="keep_gap">Garder l'écart (Mise à jour de la base)</option>
-                                                    <option value="appoint">Faire un appoint (Stock externe)</option>
-                                                </select>
-                                                <div class="reserve-extern-container flex-center" style="display: none;">
-                                                    <label class="text-sm font-bold text-dark ml-10">Qté de l'appoint :</label>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($articles as $art):
+                                    $sid = $art['stock_id'];
+                                    $theo = $art['quantite'];
+                                    $mat_id = $art['materiel_id'];
+                                    ?>
+                                    <tr class="item-row" data-stock-id="<?php echo $sid; ?>" data-theo="<?php echo $theo; ?>"
+                                        data-etat="vide" style="transition: background-color 0.3s;">
+                                        <td class="font-bold text-dark"><?php echo htmlspecialchars($art['materiel_nom']); ?></td>
+                                        <td class="text-center text-muted text-sm">
+                                            <?php echo $art['date_peremption'] ? date('d/m/Y', strtotime($art['date_peremption'])) : '-'; ?>
+                                        </td>
+                                        <td class="text-center text-lg font-bold text-muted"><?php echo $theo; ?></td>
+                                        <td class="text-center">
+                                            <input type="number" min="0" name="comptage[<?php echo $sid; ?>][counted]"
+                                                class="input-comptage" data-attendu="<?php echo $theo; ?>"
+                                                oninput="checkDifferenceInv(this, <?php echo $est_reserve ? 'true' : 'false'; ?>)"
+                                                placeholder="?"
+                                                style="width: 80px; padding: 10px; font-size: 18px; text-align: center; border: 2px solid #ccc; border-radius: 6px; font-weight: bold; outline: none;">
+                                            <input type="hidden" name="comptage[<?php echo $sid; ?>][materiel_id]"
+                                                value="<?php echo $mat_id; ?>">
+                                        </td>
+                                    </tr>
+                                    <tr class="refill-row" id="refill-<?php echo $sid; ?>"
+                                        style="display: none; background-color: #fdfaf6; border-bottom: 2px solid #ddd;">
+                                        <td colspan="4" style="padding: 10px 10px 10px 40px; border-left: 4px solid #ef6c00;">
+                                            <?php if ($est_reserve): ?>
+                                                <span class="missing-text-reserve text-warning font-bold text-md">↳ Écart constaté.</span>
+                                                <div class="reserve-tools flex-center mt-10 bg-white p-10 border-radius-4"
+                                                    style="border: 1px solid #ccc; flex-wrap: wrap;">
+                                                    <label class="text-sm font-bold text-dark">Action corrective :</label>
+                                                    <select name="comptage[<?php echo $sid; ?>][motif]" class="select-motif-reserve"
+                                                        style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;"
+                                                        onchange="toggleReserveMotif(this)">
+                                                        <option value="keep_gap">Garder l'écart (Mise à jour de la base)</option>
+                                                        <option value="appoint">Faire un appoint (Stock externe)</option>
+                                                    </select>
+                                                    <div class="reserve-extern-container flex-center" style="display: none;">
+                                                        <label class="text-sm font-bold text-dark ml-10">Qté de l'appoint :</label>
+                                                        <input type="number" name="comptage[<?php echo $sid; ?>][added_qty]"
+                                                            class="input-added-qty" value="0" min="0"
+                                                            style="width: 60px; padding: 6px; text-align: center; border: 1px solid #aaa; border-radius: 3px;">
+                                                        <label class="text-sm font-bold text-dark ml-10">Nouv. Péremption :</label>
+                                                        <input type="date" name="comptage[<?php echo $sid; ?>][added_date]"
+                                                            class="input-added-date"
+                                                            style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
+                                                    </div>
+                                                </div>
+                                            <?php else: ?>
+                                                <span class="missing-text text-warning font-bold text-md">↳ Il manque unité(s).</span>
+                                                <div class="refill-tools flex-center mt-10 bg-white p-10 border-radius-4"
+                                                    style="border: 1px solid #ccc; flex-wrap: wrap;">
+                                                    <label class="text-sm font-bold text-dark">Choisir le lot :</label>
+                                                    <select name="comptage[<?php echo $sid; ?>][reserve_stock_id]" class="input-reserve-lot"
+                                                        style="padding: 6px; border: 1px solid #aaa; border-radius: 3px; max-width: 350px;"
+                                                        onchange="updateMaxQtyInv(this)">
+                                                        <option value="">-- Ne pas recompléter (Garder l'écart) --</option>
+                                                        <?php
+                                                        $lots = $reserves_par_materiel[$mat_id] ?? [];
+                                                        foreach ($lots as $res):
+                                                            $date_format = $res['date_peremption'] ? date('d/m/Y', strtotime($res['date_peremption'])) : 'Aucune';
+                                                            $label = htmlspecialchars($res['lieu_nom']) . " | Pér: " . $date_format . " | Dispo: " . $res['quantite'];
+                                                            ?>
+                                                            <option value="<?php echo $res['reserve_stock_id']; ?>"
+                                                                data-max="<?php echo $res['quantite']; ?>"><?php echo $label; ?></option>
+                                                        <?php endforeach; ?>
+                                                        <option value="manual">Saisie manuelle externe</option>
+                                                    </select>
+                                                    <label class="text-sm font-bold text-dark ml-10">Qté ajoutée :</label>
                                                     <input type="number" name="comptage[<?php echo $sid; ?>][added_qty]"
-                                                        class="input-added-qty" value="0" min="0"
+                                                        class="input-added-qty" value="0" min="0" oninput="checkMaxQty(this)"
                                                         style="width: 60px; padding: 6px; text-align: center; border: 1px solid #aaa; border-radius: 3px;">
-                                                    <label class="text-sm font-bold text-dark ml-10">Nouv. Péremption :</label>
-                                                    <input type="date" name="comptage[<?php echo $sid; ?>][added_date]"
-                                                        class="input-added-date"
-                                                        style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
+                                                    <div class="manual-date-container flex-center ml-10" style="display: none;">
+                                                        <label class="text-sm font-bold text-dark">Nouv. Pér. :</label>
+                                                        <input type="date" name="comptage[<?php echo $sid; ?>][added_date]"
+                                                            class="input-added-date"
+                                                            style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        <?php else: ?>
-                                            <span class="missing-text text-warning font-bold text-md">↳ Il manque unité(s).</span>
-                                            <div class="refill-tools flex-center mt-10 bg-white p-10 border-radius-4"
-                                                style="border: 1px solid #ccc; flex-wrap: wrap;">
-                                                <label class="text-sm font-bold text-dark">Choisir le lot :</label>
-                                                <select name="comptage[<?php echo $sid; ?>][reserve_stock_id]" class="input-reserve-lot"
-                                                    style="padding: 6px; border: 1px solid #aaa; border-radius: 3px; max-width: 350px;"
-                                                    onchange="updateMaxQtyInv(this)">
-                                                    <option value="">-- Ne pas recompléter (Garder l'écart) --</option>
-                                                    <?php
-                                                    $lots = $reserves_par_materiel[$mat_id] ?? [];
-                                                    foreach ($lots as $res):
-                                                        $date_format = $res['date_peremption'] ? date('d/m/Y', strtotime($res['date_peremption'])) : 'Aucune';
-                                                        $label = htmlspecialchars($res['lieu_nom']) . " | Pér: " . $date_format . " | Dispo: " . $res['quantite'];
-                                                        ?>
-                                                        <option value="<?php echo $res['reserve_stock_id']; ?>"
-                                                            data-max="<?php echo $res['quantite']; ?>"><?php echo $label; ?></option>
-                                                    <?php endforeach; ?>
-                                                    <option value="manual">Saisie manuelle externe</option>
-                                                </select>
-                                                <label class="text-sm font-bold text-dark ml-10">Qté ajoutée :</label>
-                                                <input type="number" name="comptage[<?php echo $sid; ?>][added_qty]" class="input-added-qty"
-                                                    value="0" min="0" oninput="checkMaxQty(this)"
-                                                    style="width: 60px; padding: 6px; text-align: center; border: 1px solid #aaa; border-radius: 3px;">
-                                                <div class="manual-date-container flex-center ml-10" style="display: none;">
-                                                    <label class="text-sm font-bold text-dark">Nouv. Pér. :</label>
-                                                    <input type="date" name="comptage[<?php echo $sid; ?>][added_date]"
-                                                        class="input-added-date"
-                                                        style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
-                                                </div>
-                                            </div>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>
@@ -616,7 +624,7 @@ elseif ($inventaire_actif) {
 else {
     echo $message;
     $nb_catalog = $pdo->query("SELECT COUNT(*) FROM materiels")->fetchColumn();
-    $nb_objets_total = $pdo->query("SELECT TOTAL(quantite) FROM stocks")->fetchColumn() ?: 0;
+    $nb_objets_total = $pdo->query("SELECT SUM(quantite) FROM stocks")->fetchColumn() ?: 0;
     $stmt_dernier = $pdo->query("SELECT id, date_fin FROM inventaires WHERE statut = 'termine' ORDER BY date_fin DESC LIMIT 1");
     $dernier_inv = $stmt_dernier->fetch();
     $date_affichage = $dernier_inv ? date('d/m/Y à H:i', strtotime($dernier_inv['date_fin'])) : 'Jamais réalisé';
@@ -675,35 +683,37 @@ else {
                         style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
                         <?php echo htmlspecialchars($categorie); ?>
                     </h3>
-                    <table class="table-manager" style="border: 1px solid #eee;">
-                        <thead>
-                            <tr>
-                                <th style="width: 40%; border-bottom: 1px solid #ddd;">Nom du matériel</th>
-                                <th style="border-bottom: 1px solid #ddd;">Répartition par lieux (Sacs & Réserves)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($materiels_liste as $nom_mat => $lieux): ?>
-                                <?php $somme_totale_objet = 0;
-                                foreach ($lieux as $l) {
-                                    $somme_totale_objet += $l['quantite'];
-                                } ?>
-                                <tr style="border-bottom: 1px solid #eee;">
-                                    <td class="font-bold text-dark" style="border-right: 1px solid #eee;">
-                                        <?php echo htmlspecialchars($nom_mat); ?>
-                                        <div class="text-sm text-muted mt-5">Total dispo :
-                                            <strong><?php echo $somme_totale_objet; ?></strong>
-                                        </div>
-                                    </td>
-                                    <td class="text-md text-muted">
-                                        <div class="flex-row-sm"><?php foreach ($lieux as $l): ?><span class="badge"
-                                                    style="background: #f4f7f6; border: 1px solid #e0e0e0; color: #555;"><strong><?php echo htmlspecialchars($l['lieu']); ?></strong>
-                                                    : <?php echo $l['quantite']; ?></span><?php endforeach; ?></div>
-                                    </td>
+                    <div class="table-responsive">
+                        <table class="table-manager" style="border: 1px solid #eee;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40%; border-bottom: 1px solid #ddd;">Nom du matériel</th>
+                                    <th style="border-bottom: 1px solid #ddd;">Répartition par lieux (Sacs & Réserves)</th>
                                 </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($materiels_liste as $nom_mat => $lieux): ?>
+                                    <?php $somme_totale_objet = 0;
+                                    foreach ($lieux as $l) {
+                                        $somme_totale_objet += $l['quantite'];
+                                    } ?>
+                                    <tr style="border-bottom: 1px solid #eee;">
+                                        <td class="font-bold text-dark" style="border-right: 1px solid #eee;">
+                                            <?php echo htmlspecialchars($nom_mat); ?>
+                                            <div class="text-sm text-muted mt-5">Total dispo :
+                                                <strong><?php echo $somme_totale_objet; ?></strong>
+                                            </div>
+                                        </td>
+                                        <td class="text-md text-muted">
+                                            <div class="flex-row-sm"><?php foreach ($lieux as $l): ?><span class="badge"
+                                                        style="background: #f4f7f6; border: 1px solid #e0e0e0; color: #555;"><strong><?php echo htmlspecialchars($l['lieu']); ?></strong>
+                                                        : <?php echo $l['quantite']; ?></span><?php endforeach; ?></div>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>
