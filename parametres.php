@@ -115,37 +115,39 @@ require_once 'includes/header.php';
                 style="height: 40px; width: 40px; border: none; cursor: pointer;">
             <button type="submit" class="btn btn-success-dark">+</button>
         </form>
-
-        <table class="table-manager" style="width: 100%;">
-            <tbody>
-                <?php foreach ($categories as $cat): ?>
-                    <tr>
-                        <form method="POST" action="parametres.php">
-                            <input type="hidden" name="action" value="edit_cat">
-                            <input type="hidden" name="id" value="<?php echo $cat['id']; ?>">
-                            <td style="width: 40%;">
-                                <input type="text" name="nom" value="<?php echo htmlspecialchars($cat['nom']); ?>" required
-                                    class="input-field mb-0" style="padding: 5px;">
-                            </td>
-                            <td class="text-center" style="width: 15%;"><input type="color" name="couleur_fond"
-                                    value="<?php echo htmlspecialchars($cat['couleur_fond'] ?? '#2c3e50'); ?>"></td>
-                            <td class="text-center" style="width: 15%;"><input type="color" name="couleur_texte"
-                                    value="<?php echo htmlspecialchars($cat['couleur_texte'] ?? '#ffffff'); ?>"></td>
-                            <td class="text-right" style="width: 30%;">
-                                <div class="flex-center" style="justify-content: flex-end;">
-                                    <button type="submit" class="btn btn-success btn-sm">💾</button>
-                        </form>
-                        <form method="POST" action="parametres.php" onsubmit="return confirm('Supprimer ?');" class="mb-0">
-                            <input type="hidden" name="action" value="delete_cat">
-                            <input type="hidden" name="id" value="<?php echo $cat['id']; ?>">
-                            <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
-                        </form>
-        </div>
-        </td>
-        </tr>
-    <?php endforeach; ?>
-    </tbody>
-    </table>
+        <div class="table-responsive">
+            <table class="table-manager" style="width: 100%;">
+                <tbody>
+                    <?php foreach ($categories as $cat): ?>
+                        <tr>
+                            <form method="POST" action="parametres.php">
+                                <input type="hidden" name="action" value="edit_cat">
+                                <input type="hidden" name="id" value="<?php echo $cat['id']; ?>">
+                                <td style="width: 40%;">
+                                    <input type="text" name="nom" value="<?php echo htmlspecialchars($cat['nom']); ?>"
+                                        required class="input-field mb-0" style="padding: 5px;">
+                                </td>
+                                <td class="text-center" style="width: 15%;"><input type="color" name="couleur_fond"
+                                        value="<?php echo htmlspecialchars($cat['couleur_fond'] ?? '#2c3e50'); ?>"></td>
+                                <td class="text-center" style="width: 15%;"><input type="color" name="couleur_texte"
+                                        value="<?php echo htmlspecialchars($cat['couleur_texte'] ?? '#ffffff'); ?>"></td>
+                                <td class="text-right" style="width: 30%;">
+                                    <div class="flex-center" style="justify-content: flex-end;">
+                                        <button type="submit" class="btn btn-success btn-sm">💾</button>
+                            </form>
+                            <form method="POST" action="parametres.php" onsubmit="return confirm('Supprimer ?');"
+                                class="mb-0">
+                                <input type="hidden" name="action" value="delete_cat">
+                                <input type="hidden" name="id" value="<?php echo $cat['id']; ?>">
+                                <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
+                            </form>
+            </div>
+            </td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+        </table>
+    </div>
 </div>
 
 <div class="flex-1 min-w-350" style="display: flex; flex-direction: column; gap: 20px;">

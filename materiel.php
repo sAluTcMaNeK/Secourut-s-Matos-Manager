@@ -3,8 +3,15 @@
 require_once 'includes/auth.php';
 require_once 'config/db.php';
 
+// Création de la colonne fournisseur (si elle n'existe pas)
 try {
     $pdo->exec("ALTER TABLE materiels ADD COLUMN fournisseur TEXT DEFAULT ''");
+} catch (PDOException $e) {
+}
+
+// Création de la colonne check_fonctionnel (si elle n'existe pas)
+try {
+    $pdo->exec("ALTER TABLE materiels ADD COLUMN check_fonctionnel TINYINT(1) DEFAULT 0");
 } catch (PDOException $e) {
 }
 
@@ -24,9 +31,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $nom_supprime = $pdo->query("SELECT nom FROM materiels WHERE id = $id_a_supprimer")->fetchColumn();
             $pdo->prepare("DELETE FROM materiels WHERE id = :id")->execute(['id' => $id_a_supprimer]);
 
-            // Historique
             $action_texte = "A supprimé la référence : " . $nom_supprime;
-            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, NOW())")->execute([$_SESSION['username'], $action_texte]);
 
             $_SESSION['flash_success'] = "✅ Référence supprimée du catalogue.";
         } catch (PDOException $e) {
@@ -41,18 +47,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $categorie_id = $_POST['categorie_id'];
         $seuil_alerte = (int) $_POST['seuil_alerte'];
         $fournisseur = trim($_POST['fournisseur'] ?? '');
+        $check_fonctionnel = isset($_POST['check_fonctionnel']) ? 1 : 0;
 
         if (!empty($nom) && !empty($categorie_id)) {
-            try {
-                $pdo->prepare("INSERT INTO materiels (nom, categorie_id, seuil_alerte, fournisseur) VALUES (:nom, :cat_id, :seuil, :fournisseur)")->execute(['nom' => $nom, 'cat_id' => $categorie_id, 'seuil' => $seuil_alerte, 'fournisseur' => $fournisseur]);
+            $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM materiels WHERE LOWER(nom) = LOWER(:nom)");
+            $stmt_check->execute(['nom' => $nom]);
 
-                // Historique
-                $action_texte = "A ajouté une nouvelle référence : " . $nom;
-                $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+            if ($stmt_check->fetchColumn() > 0) {
+                $_SESSION['flash_error'] = "❌ Impossible : La référence '$nom' existe déjà.";
+            } else {
+                try {
+                    $pdo->prepare("INSERT INTO materiels (nom, categorie_id, seuil_alerte, fournisseur, check_fonctionnel) VALUES (:nom, :cat_id, :seuil, :fournisseur, :check)")->execute(['nom' => $nom, 'cat_id' => $categorie_id, 'seuil' => $seuil_alerte, 'fournisseur' => $fournisseur, 'check' => $check_fonctionnel]);
 
-                $_SESSION['flash_success'] = "✅ Matériel ajouté au catalogue !";
-            } catch (PDOException $e) {
-                $_SESSION['flash_error'] = "❌ Erreur : " . $e->getMessage();
+                    $action_texte = "A ajouté une nouvelle référence : " . $nom;
+                    $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, NOW())")->execute([$_SESSION['username'], $action_texte]);
+
+                    $_SESSION['flash_success'] = "✅ Matériel ajouté au catalogue !";
+                } catch (PDOException $e) {
+                    $_SESSION['flash_error'] = "❌ Erreur : " . $e->getMessage();
+                }
             }
         }
         header("Location: materiel.php");
@@ -65,18 +78,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $categorie_id = $_POST['categorie_id'];
         $seuil_alerte = (int) $_POST['seuil_alerte'];
         $fournisseur = trim($_POST['fournisseur'] ?? '');
+        $check_fonctionnel = isset($_POST['check_fonctionnel']) ? 1 : 0;
 
         if ($id > 0 && !empty($nom) && !empty($categorie_id)) {
-            try {
-                $pdo->prepare("UPDATE materiels SET nom = :nom, categorie_id = :cat_id, seuil_alerte = :seuil, fournisseur = :fournisseur WHERE id = :id")->execute(['nom' => $nom, 'cat_id' => $categorie_id, 'seuil' => $seuil_alerte, 'fournisseur' => $fournisseur, 'id' => $id]);
+            $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM materiels WHERE LOWER(nom) = LOWER(:nom) AND id != :id");
+            $stmt_check->execute(['nom' => $nom, 'id' => $id]);
 
-                // Historique
-                $action_texte = "A modifié la référence : " . $nom;
-                $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+            if ($stmt_check->fetchColumn() > 0) {
+                $_SESSION['flash_error'] = "❌ Impossible : Une autre référence porte déjà ce nom.";
+            } else {
+                try {
+                    $pdo->prepare("UPDATE materiels SET nom = :nom, categorie_id = :cat_id, seuil_alerte = :seuil, fournisseur = :fournisseur, check_fonctionnel = :check WHERE id = :id")->execute(['nom' => $nom, 'cat_id' => $categorie_id, 'seuil' => $seuil_alerte, 'fournisseur' => $fournisseur, 'check' => $check_fonctionnel, 'id' => $id]);
 
-                $_SESSION['flash_success'] = "✏️ Modifications enregistrées avec succès !";
-            } catch (PDOException $e) {
-                $_SESSION['flash_error'] = "❌ Erreur : " . $e->getMessage();
+                    $action_texte = "A modifié la référence : " . $nom;
+                    $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, NOW())")->execute([$_SESSION['username'], $action_texte]);
+
+                    $_SESSION['flash_success'] = "✏️ Modifications enregistrées avec succès !";
+                } catch (PDOException $e) {
+                    $_SESSION['flash_error'] = "❌ Erreur : " . $e->getMessage();
+                }
             }
         }
         header("Location: materiel.php");
@@ -87,7 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $stmt_cat = $pdo->query("SELECT * FROM categories ORDER BY nom");
 $categories = $stmt_cat->fetchAll();
 
-$stmt_mat = $pdo->query("SELECT m.id, m.nom, m.seuil_alerte, m.fournisseur, m.categorie_id, c.nom AS categorie_nom FROM materiels m JOIN categories c ON m.categorie_id = c.id ORDER BY c.nom, m.nom");
+$stmt_mat = $pdo->query("SELECT m.id, m.nom, m.seuil_alerte, m.fournisseur, m.check_fonctionnel, m.categorie_id, c.nom AS categorie_nom FROM materiels m JOIN categories c ON m.categorie_id = c.id ORDER BY c.nom, m.nom");
 $materiels_bruts = $stmt_mat->fetchAll();
 $materiels_par_categorie = [];
 foreach ($materiels_bruts as $mat) {
@@ -97,24 +117,23 @@ foreach ($materiels_bruts as $mat) {
 require_once 'includes/header.php';
 ?>
 
-<div style="display: flex; gap: 20px; flex-wrap: wrap;">
+<div class="catalogue-container">
 
     <?php if ($peut_editer): ?>
-        <div style="flex: 1; min-width: 300px;">
+        <div class="catalogue-sidebar">
 
             <div id="bloc-ajout" class="white-box">
-                <h2 style="margin-top: 0; color: #d32f2f; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">➕ Ajouter
-                    une référence</h2>
+                <h2 class="title-red">➕ Ajouter une référence</h2>
                 <form action="materiel.php" method="POST">
                     <input type="hidden" name="action" value="add_materiel">
 
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; font-weight: bold; font-size: 14px;">Nom</label>
-                        <input type="text" name="nom" required placeholder="Ex: Compresses stériles" class="input-field">
+                    <div class="mb-15">
+                        <label class="form-label">Nom</label>
+                        <input type="text" name="nom" required placeholder="Ex: Tensiomètre" class="input-field">
                     </div>
 
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; font-weight: bold; font-size: 14px;">Catégorie</label>
+                    <div class="mb-15">
+                        <label class="form-label">Catégorie</label>
                         <select name="categorie_id" required class="input-field">
                             <option value="">-- Choisir --</option>
                             <?php foreach ($categories as $cat): ?>
@@ -123,73 +142,91 @@ require_once 'includes/header.php';
                         </select>
                     </div>
 
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; font-weight: bold; font-size: 14px;">Fournisseur</label>
+                    <div class="mb-15">
+                        <label class="form-label">Fournisseur</label>
                         <input type="text" name="fournisseur" placeholder="Ex: SMSP, Ylea..." class="input-field">
                     </div>
 
-                    <div style="margin-bottom: 20px;">
-                        <label style="display: block; font-weight: bold; font-size: 14px;">Seuil d'alerte (Stock
-                            min.)</label>
+                    <div class="mb-15">
+                        <label class="form-label">Seuil d'alerte (Stock min.)</label>
                         <input type="number" name="seuil_alerte" value="0" min="0" class="input-field">
                     </div>
 
-                    <button type="submit"
-                        style="width: 100%; padding: 12px; background-color: #d32f2f; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Ajouter
-                        au catalogue</button>
+                    <div class="mb-20 flex-row align-center p-10 border-radius-4"
+                        style="background-color: #f5f5f5; border: 1px solid #ddd;">
+                        <input type="checkbox" name="check_fonctionnel" value="1" id="check_func_add"
+                            style="transform: scale(1.4); margin-right: 12px; cursor: pointer;">
+                        <label for="check_func_add" class="form-label mb-0" style="cursor: pointer; font-size: 13px;">Check Fonctionnel)</label>
+                    </div>
+
+                    <button type="submit" class="btn btn-danger-dark btn-full">Ajouter au catalogue</button>
                 </form>
             </div>
 
-            <div id="bloc-edition"
-                style="display: none; background: #fff3e0; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-left: 5px solid #ef6c00;">
-                <h2 style="margin-top: 0; color: #e65100; border-bottom: 2px solid #ffe0b2; padding-bottom: 10px;">✏️
-                    Modifier la référence</h2>
+            <div id="bloc-edition" class="form-box-orange">
+                <h2 class="title-orange">✏️ Modifier la référence</h2>
                 <form action="materiel.php" method="POST">
                     <input type="hidden" name="action" value="edit_materiel">
                     <input type="hidden" name="materiel_id" id="edit_id" value="">
 
-                    <div style="margin-bottom: 15px;"><label
-                            style="display: block; font-weight: bold; font-size: 14px; color: #e65100;">Nom</label><input
-                            type="text" name="nom" id="edit_nom" required class="input-field"
-                            style="border-color: #ffcc80;"></div>
-                    <div style="margin-bottom: 15px;"><label
-                            style="display: block; font-weight: bold; font-size: 14px; color: #e65100;">Catégorie</label><select
-                            name="categorie_id" id="edit_categorie_id" required class="input-field"
-                            style="border-color: #ffcc80;"><?php foreach ($categories as $cat): ?>
+                    <div class="mb-15">
+                        <label class="form-label-edit">Nom</label>
+                        <input type="text" name="nom" id="edit_nom" required class="input-field input-edit-focus">
+                    </div>
+                    <div class="mb-15">
+                        <label class="form-label-edit">Catégorie</label>
+                        <select name="categorie_id" id="edit_categorie_id" required class="input-field input-edit-focus">
+                            <?php foreach ($categories as $cat): ?>
                                 <option value="<?php echo $cat['id']; ?>"><?php echo htmlspecialchars($cat['nom']); ?></option>
                             <?php endforeach; ?>
-                        </select></div>
-                    <div style="margin-bottom: 15px;"><label
-                            style="display: block; font-weight: bold; font-size: 14px; color: #e65100;">Fournisseur</label><input
-                            type="text" name="fournisseur" id="edit_fournisseur" class="input-field"
-                            style="border-color: #ffcc80;"></div>
-                    <div style="margin-bottom: 20px;"><label
-                            style="display: block; font-weight: bold; font-size: 14px; color: #e65100;">Seuil
-                            d'alerte</label><input type="number" name="seuil_alerte" id="edit_seuil_alerte" min="0"
-                            class="input-field" style="border-color: #ffcc80;"></div>
+                        </select>
+                    </div>
+                    <div class="mb-15">
+                        <label class="form-label-edit">Fournisseur</label>
+                        <input type="text" name="fournisseur" id="edit_fournisseur" class="input-field input-edit-focus">
+                    </div>
+                    <div class="mb-15">
+                        <label class="form-label-edit">Seuil d'alerte</label>
+                        <input type="number" name="seuil_alerte" id="edit_seuil_alerte" min="0"
+                            class="input-field input-edit-focus">
+                    </div>
 
-                    <div style="display: flex; gap: 10px;">
-                        <button type="submit"
-                            style="flex: 2; padding: 12px; background-color: #ef6c00; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Enregistrer</button>
+                    <div class="mb-20 flex-row align-center p-10 border-radius-4"
+                        style="background-color: #ffe0b2; border: 1px solid #ffcc80;">
+                        <input type="checkbox" name="check_fonctionnel" value="1" id="edit_check_fonctionnel"
+                            style="transform: scale(1.4); margin-right: 12px; cursor: pointer;">
+                        <label for="edit_check_fonctionnel" class="form-label-edit mb-0"
+                            style="cursor: pointer; font-size: 13px; color: #e65100;">Remplacer le comptage par un "Check
+                            Fonctionnel"</label>
+                    </div>
+
+                    <div class="flex-row-sm">
+                        <button type="submit" class="btn btn-warning btn-flex-2">Enregistrer</button>
                         <button type="button" onclick="fermerEdition()"
-                            style="flex: 1; padding: 12px; background-color: #ccc; color: #333; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Annuler</button>
+                            class="btn btn-secondary btn-flex-1">Annuler</button>
                     </div>
                 </form>
             </div>
         </div>
     <?php endif; ?>
 
-    <div class="white-box" style="flex: 2; min-width: 400px; margin-bottom: 0;">
-        <?php if (!$peut_editer)
-            echo $message; ?>
-        <h2 style="margin-top: 0; color: #333; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">📦 Catalogue
-            Secourut's</h2>
+    <div class="white-box catalogue-main">
+
+        <div class="search-header">
+            <h2 class="mb-0 text-dark mt-0">📦 Catalogue Secourut's</h2>
+            <div class="search-container">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="searchCatalogue" class="search-input" placeholder="Chercher un matériel..."
+                    onkeyup="filtrerCatalogue()">
+            </div>
+        </div>
 
         <?php if (empty($materiels_par_categorie)): ?>
-            <p style="color: #666; font-style: italic; text-align: center; padding: 20px;">Le catalogue est vide.</p>
+            <p class="empty-message">Le catalogue est vide.</p>
         <?php else: ?>
             <?php foreach ($materiels_par_categorie as $categorie => $articles): ?>
-                <div style="margin-bottom: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
+
+                <div class="catalogue-block category-card">
                     <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
 
                     <h3 class="category-header"
@@ -197,55 +234,58 @@ require_once 'includes/header.php';
                         <?php echo htmlspecialchars($categorie); ?>
                     </h3>
 
-                    <table class="table-manager">
-                        <thead>
-                            <tr>
-                                <th style="width: <?php echo $peut_editer ? '40%' : '50%'; ?>;">NOM</th>
-                                <th style="width: <?php echo $peut_editer ? '35%' : '40%'; ?>;">FOURNISSEUR</th>
-                                <th style="text-align: center; width: 10%;">SEUIL</th>
-                                <?php if ($peut_editer): ?>
-                                    <th style="text-align: center; width: 15%;">ACTIONS</th><?php endif; ?>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($articles as $mat): ?>
+                    <div class="table-responsive">
+                        <table class="table-manager">
+                            <thead>
                                 <tr>
-                                    <td style="font-weight: 500; color: #444;"><?php echo htmlspecialchars($mat['nom']); ?></td>
-                                    <td style="color: #666; font-size: 14px;">
-                                        <?php echo !empty($mat['fournisseur']) ? htmlspecialchars($mat['fournisseur']) : ''; ?>
-                                    </td>
-                                    <td style="text-align: center;"><span
-                                            style="color: #e65100; font-weight: bold;"><?php echo htmlspecialchars($mat['seuil_alerte']); ?></span>
-                                    </td>
+                                    <th style="width: <?php echo $peut_editer ? '40%' : '50%'; ?>;">NOM</th>
+                                    <th style="width: <?php echo $peut_editer ? '35%' : '40%'; ?>;">FOURNISSEUR</th>
+                                    <th class="text-center" style="width: 10%;">SEUIL</th>
                                     <?php if ($peut_editer): ?>
-                                        <td style="text-align: center;">
-                                            <div style="display: flex; justify-content: center; gap: 10px;">
-                                                <button type="button"
-                                                    onclick="ouvrirEdition(<?php echo $mat['id']; ?>, '<?php echo htmlspecialchars(addslashes($mat['nom'])); ?>', <?php echo $mat['categorie_id']; ?>, '<?php echo htmlspecialchars(addslashes($mat['fournisseur'])); ?>', <?php echo $mat['seuil_alerte']; ?>)"
-                                                    style="background: transparent; border: none; cursor: pointer; font-size: 16px;"
-                                                    title="Modifier">✏️</button>
-                                                <form method="POST" action="materiel.php" style="margin: 0;"
-                                                    onsubmit="return confirm('ATTENTION ! Supprimer ?');">
-                                                    <input type="hidden" name="action" value="delete_materiel">
-                                                    <input type="hidden" name="materiel_id" value="<?php echo $mat['id']; ?>">
-                                                    <button type="submit"
-                                                        style="background: transparent; border: none; cursor: pointer; font-size: 16px; color: #999;"
-                                                        title="Supprimer">🗑️</button>
-                                                </form>
-                                            </div>
-                                        </td>
+                                        <th class="text-center" style="width: 15%;">ACTIONS</th>
                                     <?php endif; ?>
                                 </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($articles as $mat): ?>
+                                    <tr class="catalogue-row" data-nom="<?php echo htmlspecialchars(strtolower($mat['nom'])); ?>">
+                                        <td class="item-name">
+                                            <?php echo htmlspecialchars($mat['nom']); ?>
+                                            <?php if ($mat['check_fonctionnel'] == 1): ?>
+                                                <div class="text-muted mt-5" style="font-size: 11px;">⚙️ Vérif. Fonctionnelle</div>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="item-supplier">
+                                            <?php echo !empty($mat['fournisseur']) ? htmlspecialchars($mat['fournisseur']) : ''; ?>
+                                        </td>
+                                        <td class="text-center">
+                                            <span
+                                                class="text-warning font-bold"><?php echo htmlspecialchars($mat['seuil_alerte']); ?></span>
+                                        </td>
+                                        <?php if ($peut_editer): ?>
+                                            <td class="text-center">
+                                                <div class="flex-center" style="justify-content: center;">
+                                                    <button type="button" class="btn-icon"
+                                                        onclick="ouvrirEdition(<?php echo $mat['id']; ?>, '<?php echo htmlspecialchars(addslashes($mat['nom'])); ?>', <?php echo $mat['categorie_id']; ?>, '<?php echo htmlspecialchars(addslashes($mat['fournisseur'])); ?>', <?php echo $mat['seuil_alerte']; ?>, <?php echo $mat['check_fonctionnel']; ?>)"
+                                                        title="Modifier">✏️</button>
+                                                    <form method="POST" action="materiel.php" class="mb-0"
+                                                        onsubmit="return confirm('ATTENTION ! Supprimer ?');">
+                                                        <input type="hidden" name="action" value="delete_materiel">
+                                                        <input type="hidden" name="materiel_id" value="<?php echo $mat['id']; ?>">
+                                                        <button type="submit" class="btn-icon text-muted" title="Supprimer">🗑️</button>
+                                                    </form>
+                                                </div>
+                                            </td>
+                                        <?php endif; ?>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>
     </div>
 </div>
-
-<?php if ($peut_editer): ?>
-<?php endif; ?>
 
 <?php require_once 'includes/footer.php'; ?>

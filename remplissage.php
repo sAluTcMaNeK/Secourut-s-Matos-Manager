@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("DELETE FROM evenements_lieux WHERE evenement_id = ?")->execute([$event_id]);
             logAction($pdo, "A supprimé le DPS : $nom_event");
 
-            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")
+            $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, NOW())")
                 ->execute([$_SESSION['username'], "A supprimé le DPS : $nom_event"]);
 
             $_SESSION['flash_success'] = "🗑️ Le DPS a été supprimé.";
@@ -48,7 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sacs_selectionnes = $_POST['lieux'] ?? [];
 
             if (!empty($nom_event) && !empty($date_event) && !empty($sacs_selectionnes)) {
-                $stmt = $pdo->prepare("INSERT INTO evenements (nom, date_evenement, statut, cree_le) VALUES (?, ?, 'a_verifier', datetime('now', 'localtime'))");
+                $stmt = $pdo->prepare("INSERT INTO evenements (nom, date_evenement, statut, cree_le) VALUES (?, ?, 'a_verifier', NOW())");
                 $stmt->execute([$nom_event, $date_event]);
                 $event_id = $pdo->lastInsertId();
 

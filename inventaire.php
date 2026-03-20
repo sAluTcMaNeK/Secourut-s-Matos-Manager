@@ -30,14 +30,14 @@ if ($action === 'export_xls') {
 }
 
 if ($action === 'lancer' && !$inventaire_actif && $peut_editer) {
-    $pdo->exec("INSERT INTO inventaires (date_debut) VALUES (datetime('now', 'localtime'))");
+    $pdo->exec("INSERT INTO inventaires (date_debut) VALUES (NOW())");
     logAction($pdo, "A lancé un nouvel inventaire global");
     header("Location: inventaire.php");
     exit;
 }
 
 if ($action === 'cloturer' && $inventaire_actif && $peut_editer) {
-    $stmt = $pdo->prepare("UPDATE inventaires SET statut = 'termine', date_fin = datetime('now', 'localtime') WHERE id = ?");
+    $stmt = $pdo->prepare("UPDATE inventaires SET statut = 'termine', date_fin = NOW() WHERE id = ?");
     $stmt->execute([$inventaire_actif['id']]);
     logAction($pdo, "A clôturé l'inventaire global");
     header("Location: inventaire.php?msg=cloture");
@@ -248,8 +248,7 @@ if ($action === 'rapport') {
                     résumé</a>
                 <h2 class="page-title mt-10">📊 Rapport d'inventaire</h2>
                 <p class="mt-5 mb-0 text-muted font-italic">Clôturé le
-                    <?php echo date('d/m/Y à H:i', strtotime($inv['date_fin'])); ?>
-                </p>
+                    <?php echo date('d/m/Y à H:i', strtotime($inv['date_fin'])); ?></p>
             </div>
             <div class="no-print flex-center">
                 <a href="inventaire.php?action=export_xls" class="btn btn-success-dark">📥 Export Excel</a>
@@ -366,7 +365,13 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
 
     $est_reserve = $lieu['est_reserve'] == 1;
 
-    $stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.quantite, s.date_peremption, m.id AS materiel_id, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom");
+    // --- LOGIQUE MATÉRIEL LOURD ---
+    $est_malle_radio = (stripos($lieu['nom'], 'radio') !== false);
+    $est_sac_dsa = (stripos($lieu['nom'], 'dsa') !== false || stripos($lieu['nom'], 'defibrillateur') !== false || stripos($lieu['nom'], 'défibrillateur') !== false);
+    // ------------------------------
+
+    // On intègre m.check_fonctionnel à la requête
+    $stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.quantite, s.date_peremption, m.id AS materiel_id, m.nom AS materiel_nom, m.check_fonctionnel, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom");
     $stmt_stocks->execute(['lieu_id' => $lieu_id]);
     $stocks = $stmt_stocks->fetchAll();
 
@@ -409,6 +414,13 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
 
     <form id="form-inventaire" method="POST" action="inventaire.php?action=comptage&lieu_id=<?php echo $lieu_id; ?>">
         <input type="hidden" name="valider_lieu" value="1">
+
+        <div class="alert alert-warning mb-25">
+            <strong class="text-danger">⚠️ AVERTISSEMENT :</strong> Le bouton de validation restera bloqué tant que <span
+                class="text-danger font-bold">TOUTES</span> les vérifications obligatoires (cases à cocher de sécurité et
+            vérifications fonctionnelles) ne seront pas cochées.
+        </div>
+
         <?php if (empty($stocks_par_categorie)): ?>
             <p class="text-center text-muted font-italic">Ce lieu est vide.</p>
         <?php else: ?>
@@ -434,6 +446,14 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                                     $sid = $art['stock_id'];
                                     $theo = $art['quantite'];
                                     $mat_id = $art['materiel_id'];
+
+                                    // Détections
+                                    $nom_mat_lower = strtolower($art['materiel_nom']);
+                                    $est_item_radio = ($est_malle_radio && (strpos($nom_mat_lower, 'radio') !== false || strpos($nom_mat_lower, 'talkie') !== false));
+                                    $est_item_dsa = ($est_sac_dsa && (strpos($nom_mat_lower, 'dsa') !== false || strpos($nom_mat_lower, 'defibrillateur') !== false || strpos($nom_mat_lower, 'défibrillateur') !== false));
+                                    $est_item_check = ($art['check_fonctionnel'] == 1);
+
+                                    $est_item_special = ($est_item_radio || $est_item_dsa || $est_item_check);
                                     ?>
                                     <tr class="item-row" data-stock-id="<?php echo $sid; ?>" data-theo="<?php echo $theo; ?>"
                                         data-etat="vide" style="transition: background-color 0.3s;">
@@ -443,74 +463,134 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                                         </td>
                                         <td class="text-center text-lg font-bold text-muted"><?php echo $theo; ?></td>
                                         <td class="text-center">
-                                            <input type="number" min="0" name="comptage[<?php echo $sid; ?>][counted]"
-                                                class="input-comptage" data-attendu="<?php echo $theo; ?>"
-                                                oninput="checkDifferenceInv(this, <?php echo $est_reserve ? 'true' : 'false'; ?>)"
-                                                placeholder="?"
-                                                style="width: 80px; padding: 10px; font-size: 18px; text-align: center; border: 2px solid #ccc; border-radius: 6px; font-weight: bold; outline: none;">
+                                            <?php if ($est_item_radio): ?>
+                                                <div class="text-left mt-10 mb-10"
+                                                    style="display: inline-block; text-align: left; user-select: none;">
+                                                    <label class="display-block mb-10 font-bold" style="cursor: pointer; font-size: 15px;">
+                                                        <input type="checkbox" class="special-check-<?php echo $sid; ?>"
+                                                            onchange="checkSpecial(<?php echo $sid; ?>, <?php echo $theo; ?>, 'inv', <?php echo $est_reserve ? 'true' : 'false'; ?>)"
+                                                            style="transform: scale(1.6); margin-right: 12px; cursor: pointer; vertical-align: middle;">
+                                                        🔋 Batterie chargée
+                                                    </label>
+                                                    <label class="display-block mb-10 font-bold" style="cursor: pointer; font-size: 15px;">
+                                                        <input type="checkbox" class="special-check-<?php echo $sid; ?>"
+                                                            onchange="checkSpecial(<?php echo $sid; ?>, <?php echo $theo; ?>, 'inv', <?php echo $est_reserve ? 'true' : 'false'; ?>)"
+                                                            style="transform: scale(1.6); margin-right: 12px; cursor: pointer; vertical-align: middle;">
+                                                        📻 Bon état de marche
+                                                    </label>
+                                                    <label class="display-block font-bold" style="cursor: pointer; font-size: 15px;">
+                                                        <input type="checkbox" class="special-check-<?php echo $sid; ?>"
+                                                            onchange="checkSpecial(<?php echo $sid; ?>, <?php echo $theo; ?>, 'inv', <?php echo $est_reserve ? 'true' : 'false'; ?>)"
+                                                            style="transform: scale(1.6); margin-right: 12px; cursor: pointer; vertical-align: middle;">
+                                                        🔴 Appareil éteint
+                                                    </label>
+                                                </div>
+                                                <input type="hidden" name="comptage[<?php echo $sid; ?>][counted]"
+                                                    id="counted-<?php echo $sid; ?>" class="input-comptage"
+                                                    data-attendu="<?php echo $theo; ?>" value="">
+
+                                            <?php elseif ($est_item_dsa): ?>
+                                                <div class="text-left mt-10 mb-10"
+                                                    style="display: inline-block; text-align: left; user-select: none;">
+                                                    <label class="display-block font-bold" style="cursor: pointer; font-size: 15px;">
+                                                        <input type="checkbox" class="special-check-<?php echo $sid; ?>"
+                                                            onchange="checkSpecial(<?php echo $sid; ?>, <?php echo $theo; ?>, 'inv', <?php echo $est_reserve ? 'true' : 'false'; ?>)"
+                                                            style="transform: scale(1.6); margin-right: 12px; cursor: pointer; vertical-align: middle;">
+                                                        🔋 Niveau des piles OK
+                                                    </label>
+                                                </div>
+                                                <input type="hidden" name="comptage[<?php echo $sid; ?>][counted]"
+                                                    id="counted-<?php echo $sid; ?>" class="input-comptage"
+                                                    data-attendu="<?php echo $theo; ?>" value="">
+
+                                            <?php elseif ($est_item_check): ?>
+                                                <div class="text-left mt-10 mb-10"
+                                                    style="display: inline-block; text-align: left; user-select: none;">
+                                                    <label class="display-block font-bold" style="cursor: pointer; font-size: 15px;">
+                                                        <input type="checkbox" class="special-check-<?php echo $sid; ?>"
+                                                            onchange="checkSpecial(<?php echo $sid; ?>, <?php echo $theo; ?>, 'inv', <?php echo $est_reserve ? 'true' : 'false'; ?>)"
+                                                            style="transform: scale(1.6); margin-right: 12px; cursor: pointer; vertical-align: middle;">
+                                                        ⚙️ Fonctionnel.le
+                                                    </label>
+                                                </div>
+                                                <input type="hidden" name="comptage[<?php echo $sid; ?>][counted]"
+                                                    id="counted-<?php echo $sid; ?>" class="input-comptage"
+                                                    data-attendu="<?php echo $theo; ?>" value="">
+
+                                            <?php else: ?>
+                                                <input type="number" min="0" name="comptage[<?php echo $sid; ?>][counted]"
+                                                    class="input-comptage" data-attendu="<?php echo $theo; ?>"
+                                                    oninput="checkDifferenceInv(this, <?php echo $est_reserve ? 'true' : 'false'; ?>)"
+                                                    placeholder="?"
+                                                    style="width: 80px; padding: 10px; font-size: 18px; text-align: center; border: 2px solid #ccc; border-radius: 6px; font-weight: bold; outline: none;">
+                                            <?php endif; ?>
                                             <input type="hidden" name="comptage[<?php echo $sid; ?>][materiel_id]"
                                                 value="<?php echo $mat_id; ?>">
                                         </td>
                                     </tr>
-                                    <tr class="refill-row" id="refill-<?php echo $sid; ?>"
-                                        style="display: none; background-color: #fdfaf6; border-bottom: 2px solid #ddd;">
-                                        <td colspan="4" style="padding: 10px 10px 10px 40px; border-left: 4px solid #ef6c00;">
-                                            <?php if ($est_reserve): ?>
-                                                <span class="missing-text-reserve text-warning font-bold text-md">↳ Écart constaté.</span>
-                                                <div class="reserve-tools flex-center mt-10 bg-white p-10 border-radius-4"
-                                                    style="border: 1px solid #ccc; flex-wrap: wrap;">
-                                                    <label class="text-sm font-bold text-dark">Action corrective :</label>
-                                                    <select name="comptage[<?php echo $sid; ?>][motif]" class="select-motif-reserve"
-                                                        style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;"
-                                                        onchange="toggleReserveMotif(this)">
-                                                        <option value="keep_gap">Garder l'écart (Mise à jour de la base)</option>
-                                                        <option value="appoint">Faire un appoint (Stock externe)</option>
-                                                    </select>
-                                                    <div class="reserve-extern-container flex-center" style="display: none;">
-                                                        <label class="text-sm font-bold text-dark ml-10">Qté de l'appoint :</label>
+
+                                    <?php if (!$est_item_special): ?>
+                                        <tr class="refill-row" id="refill-<?php echo $sid; ?>"
+                                            style="display: none; background-color: #fdfaf6; border-bottom: 2px solid #ddd;">
+                                            <td colspan="4" style="padding: 10px 10px 10px 40px; border-left: 4px solid #ef6c00;">
+                                                <?php if ($est_reserve): ?>
+                                                    <span class="missing-text-reserve text-warning font-bold text-md">↳ Écart constaté.</span>
+                                                    <div class="reserve-tools flex-center mt-10 bg-white p-10 border-radius-4"
+                                                        style="border: 1px solid #ccc; flex-wrap: wrap;">
+                                                        <label class="text-sm font-bold text-dark">Action corrective :</label>
+                                                        <select name="comptage[<?php echo $sid; ?>][motif]" class="select-motif-reserve"
+                                                            style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;"
+                                                            onchange="toggleReserveMotif(this)">
+                                                            <option value="keep_gap">Garder l'écart (Mise à jour de la base)</option>
+                                                            <option value="appoint">Faire un appoint (Stock externe)</option>
+                                                        </select>
+                                                        <div class="reserve-extern-container flex-center" style="display: none;">
+                                                            <label class="text-sm font-bold text-dark ml-10">Qté de l'appoint :</label>
+                                                            <input type="number" name="comptage[<?php echo $sid; ?>][added_qty]"
+                                                                class="input-added-qty" value="0" min="0"
+                                                                style="width: 60px; padding: 6px; text-align: center; border: 1px solid #aaa; border-radius: 3px;">
+                                                            <label class="text-sm font-bold text-dark ml-10">Nouv. Péremption :</label>
+                                                            <input type="date" name="comptage[<?php echo $sid; ?>][added_date]"
+                                                                class="input-added-date"
+                                                                style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
+                                                        </div>
+                                                    </div>
+                                                <?php else: ?>
+                                                    <span class="missing-text text-warning font-bold text-md">↳ Il manque unité(s).</span>
+                                                    <div class="refill-tools flex-center mt-10 bg-white p-10 border-radius-4"
+                                                        style="border: 1px solid #ccc; flex-wrap: wrap;">
+                                                        <label class="text-sm font-bold text-dark">Choisir le lot :</label>
+                                                        <select name="comptage[<?php echo $sid; ?>][reserve_stock_id]" class="input-reserve-lot"
+                                                            style="padding: 6px; border: 1px solid #aaa; border-radius: 3px; max-width: 350px;"
+                                                            onchange="updateMaxQtyInv(this)">
+                                                            <option value="">-- Ne pas recompléter (Garder l'écart) --</option>
+                                                            <?php
+                                                            $lots = $reserves_par_materiel[$mat_id] ?? [];
+                                                            foreach ($lots as $res):
+                                                                $date_format = $res['date_peremption'] ? date('d/m/Y', strtotime($res['date_peremption'])) : 'Aucune';
+                                                                $label = htmlspecialchars($res['lieu_nom']) . " | Pér: " . $date_format . " | Dispo: " . $res['quantite'];
+                                                                ?>
+                                                                <option value="<?php echo $res['reserve_stock_id']; ?>"
+                                                                    data-max="<?php echo $res['quantite']; ?>"><?php echo $label; ?></option>
+                                                            <?php endforeach; ?>
+                                                            <option value="manual">Saisie manuelle externe</option>
+                                                        </select>
+                                                        <label class="text-sm font-bold text-dark ml-10">Qté ajoutée :</label>
                                                         <input type="number" name="comptage[<?php echo $sid; ?>][added_qty]"
-                                                            class="input-added-qty" value="0" min="0"
+                                                            class="input-added-qty" value="0" min="0" oninput="checkMaxQty(this)"
                                                             style="width: 60px; padding: 6px; text-align: center; border: 1px solid #aaa; border-radius: 3px;">
-                                                        <label class="text-sm font-bold text-dark ml-10">Nouv. Péremption :</label>
-                                                        <input type="date" name="comptage[<?php echo $sid; ?>][added_date]"
-                                                            class="input-added-date"
-                                                            style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
+                                                        <div class="manual-date-container flex-center ml-10" style="display: none;">
+                                                            <label class="text-sm font-bold text-dark">Nouv. Pér. :</label>
+                                                            <input type="date" name="comptage[<?php echo $sid; ?>][added_date]"
+                                                                class="input-added-date"
+                                                                style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            <?php else: ?>
-                                                <span class="missing-text text-warning font-bold text-md">↳ Il manque unité(s).</span>
-                                                <div class="refill-tools flex-center mt-10 bg-white p-10 border-radius-4"
-                                                    style="border: 1px solid #ccc; flex-wrap: wrap;">
-                                                    <label class="text-sm font-bold text-dark">Choisir le lot :</label>
-                                                    <select name="comptage[<?php echo $sid; ?>][reserve_stock_id]" class="input-reserve-lot"
-                                                        style="padding: 6px; border: 1px solid #aaa; border-radius: 3px; max-width: 350px;"
-                                                        onchange="updateMaxQtyInv(this)">
-                                                        <option value="">-- Ne pas recompléter (Garder l'écart) --</option>
-                                                        <?php
-                                                        $lots = $reserves_par_materiel[$mat_id] ?? [];
-                                                        foreach ($lots as $res):
-                                                            $date_format = $res['date_peremption'] ? date('d/m/Y', strtotime($res['date_peremption'])) : 'Aucune';
-                                                            $label = htmlspecialchars($res['lieu_nom']) . " | Pér: " . $date_format . " | Dispo: " . $res['quantite'];
-                                                            ?>
-                                                            <option value="<?php echo $res['reserve_stock_id']; ?>"
-                                                                data-max="<?php echo $res['quantite']; ?>"><?php echo $label; ?></option>
-                                                        <?php endforeach; ?>
-                                                        <option value="manual">Saisie manuelle externe</option>
-                                                    </select>
-                                                    <label class="text-sm font-bold text-dark ml-10">Qté ajoutée :</label>
-                                                    <input type="number" name="comptage[<?php echo $sid; ?>][added_qty]"
-                                                        class="input-added-qty" value="0" min="0" oninput="checkMaxQty(this)"
-                                                        style="width: 60px; padding: 6px; text-align: center; border: 1px solid #aaa; border-radius: 3px;">
-                                                    <div class="manual-date-container flex-center ml-10" style="display: none;">
-                                                        <label class="text-sm font-bold text-dark">Nouv. Pér. :</label>
-                                                        <input type="date" name="comptage[<?php echo $sid; ?>][added_date]"
-                                                            class="input-added-date"
-                                                            style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
-                                                    </div>
-                                                </div>
-                                            <?php endif; ?>
-                                        </td>
-                                    </tr>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                    <?php endif; ?>
+
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
@@ -519,10 +599,63 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
             <?php endforeach; ?>
         <?php endif; ?>
         <div class="text-center mt-30 mb-30 pb-30">
-            <button type="button" onclick="validerFormulaireInventaire()" class="btn btn-success-dark btn-lg">✅ Valider ce
-                lieu</button>
+            <button type="button" id="btn-valider-sac" onclick="validerFormulaireInventaire()"
+                class="btn btn-success-dark btn-lg">✅ Valider ce lieu</button>
         </div>
     </form>
+
+    <script>
+        function checkSpecial(sid, theo, mode, isReserve = false) {
+            let checks = document.querySelectorAll('.special-check-' + sid);
+            let allChecked = true;
+            checks.forEach(c => { if (!c.checked) allChecked = false; });
+
+            let hiddenInput = document.getElementById('counted-' + sid);
+            if (hiddenInput) {
+                hiddenInput.value = allChecked ? theo : 0;
+            }
+
+            if (typeof checkDifferenceInv === 'function') {
+                checkDifferenceInv(hiddenInput, isReserve);
+            }
+
+            checkGlobalSpecialState();
+        }
+
+        function checkGlobalSpecialState() {
+            let allCheckboxes = document.querySelectorAll('input[type="checkbox"][class^="special-check-"]');
+            let btn = document.getElementById('btn-valider-sac');
+
+            if (allCheckboxes.length > 0) {
+                let allValid = true;
+                allCheckboxes.forEach(c => {
+                    if (!c.checked) allValid = false;
+                });
+
+                if (btn) {
+                    btn.disabled = !allValid;
+                    if (allValid) {
+                        btn.style.opacity = '1';
+                        btn.style.cursor = 'pointer';
+                    } else {
+                        btn.style.opacity = '0.5';
+                        btn.style.cursor = 'not-allowed';
+                    }
+                }
+            } else {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.style.cursor = 'pointer';
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            checkGlobalSpecialState();
+        });
+    </script>
+
     <?php
 }
 

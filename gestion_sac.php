@@ -87,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (function_exists('logAction'))
                 logAction($pdo, $action_texte);
             else
-                $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, datetime('now', 'localtime'))")->execute([$_SESSION['username'], $action_texte]);
+                $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, NOW())")->execute([$_SESSION['username'], $action_texte]);
 
         } elseif ($action === 'delete_stock') {
             $stock_id = (int) $_POST['stock_id'];
@@ -166,7 +166,36 @@ if (!$lieu) {
     exit;
 }
 $est_reserve = $lieu['est_reserve'] == 1;
-$materiels = $pdo->query("SELECT id, nom FROM materiels ORDER BY nom")->fetchAll();
+
+// ==========================================
+// LOGIQUE DE SÉPARATION MATÉRIEL LOURD / RADIO
+// ==========================================
+// 1. On détecte si le lieu actuel est dédié aux radios
+$est_malle_radio = (stripos($lieu['nom'], 'radio') !== false);
+
+// 2. On récupère le catalogue avec les noms de catégories
+$stmt_mat = $pdo->query("
+    SELECT m.id, m.nom, c.nom AS categorie_nom 
+    FROM materiels m 
+    JOIN categories c ON m.categorie_id = c.id 
+    ORDER BY c.nom, m.nom
+");
+$tous_materiels = $stmt_mat->fetchAll();
+
+// 3. On filtre ce qui a le droit d'aller dans ce sac 
+$materiels = [];
+foreach ($tous_materiels as $mat) {
+    $cat_est_radio = (stripos($mat['categorie_nom'], 'radio') !== false);
+
+    // RÈGLE : Si c'est une malle radio, on n'accepte QUE les catégories "radio"
+    if ($est_malle_radio && $cat_est_radio) {
+        $materiels[] = $mat;
+    }
+    // RÈGLE : Si c'est un sac normal, on n'accepte PAS les catégories "radio"
+    elseif (!$est_malle_radio && !$cat_est_radio) {
+        $materiels[] = $mat;
+    }
+}
 
 // AJOUT DE s.materiel_id POUR LA SELECTION DE RESERVE
 $stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.materiel_id, s.quantite, s.date_peremption, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom, s.date_peremption");
@@ -216,7 +245,8 @@ require_once 'includes/header.php';
                         onchange="updateReserveOptions(this.value)">
                         <option value="">-- Sélectionner le matériel --</option>
                         <?php foreach ($materiels as $mat): ?>
-                            <option value="<?php echo $mat['id']; ?>"><?php echo htmlspecialchars($mat['nom']); ?></option>
+                            <option value="<?php echo $mat['id']; ?>">
+                                <?php echo htmlspecialchars($mat['categorie_nom'] . ' - ' . $mat['nom']); ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>

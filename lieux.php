@@ -213,7 +213,7 @@ if ($lieu_id > 0) {
                         style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
                         <?php echo htmlspecialchars($categorie); ?>
                     </h3>
-
+                <div class="table-responsive">
                     <table class="table-manager">
                         <thead>
                             <tr>
@@ -236,6 +236,7 @@ if ($lieu_id > 0) {
                             <?php endforeach; ?>
                         </tbody>
                     </table>
+                </div>
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>
