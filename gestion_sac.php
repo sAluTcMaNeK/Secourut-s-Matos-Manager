@@ -2,14 +2,40 @@
 // gestion_sac.php
 require_once 'includes/auth.php';
 require_once 'config/db.php';
+require_once 'includes/functions.php';
+try {
+    $pdo->exec("ALTER TABLE stocks ADD COLUMN poche VARCHAR(100) DEFAULT ''");
+} catch (PDOException $e) {
+}
 
 $lieu_id = isset($_GET['lieu_id']) ? (int) $_GET['lieu_id'] : 0;
 $peut_editer = ($_SESSION['can_edit'] === 1 || (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'));
+// --- VÉRIFICATION DU VERROUILLAGE (SCELLÉ) ---
+$dps_scelle = false;
+if ($lieu_id > 0) {
+    // On cherche si ce sac est validé sur un événement futur ou du jour
+    $stmt_scelle = $pdo->prepare("
+        SELECT e.nom, e.date_evenement 
+        FROM evenements_lieux el 
+        JOIN evenements e ON el.evenement_id = e.id 
+        WHERE el.lieu_id = ? AND el.statut = 'valide' AND DATE(e.date_evenement) >= CURRENT_DATE()
+        LIMIT 1
+    ");
+    $stmt_scelle->execute([$lieu_id]);
+    $dps_scelle = $stmt_scelle->fetch();
+}
+$est_verrouille = ($dps_scelle !== false);
+// ---------------------------------------------
 
 // ==========================================
 // TRAITEMENT DES FORMULAIRES (PATTERN PRG)
 // ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // --- VÉRIFICATION DU JETON CSRF ---
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
+        die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité (Jeton CSRF invalide ou expiré). Veuillez recharger la page.</div>");
+    }
+    // ----------------------------------
     if (!$peut_editer) {
         $_SESSION['flash_error'] = "🛑 Action bloquée : Vous n'avez pas les droits de modification.";
         header("Location: gestion_sac.php?lieu_id=" . $lieu_id);
@@ -29,6 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $qty = (int) $_POST['quantite'];
             $date_p = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
             $reserve_stock_id = $_POST['reserve_stock_id'] ?? '';
+            $poche = trim($_POST['poche'] ?? ''); // NOUVEAU: Récupère la poche
 
             $stmt_current = $pdo->prepare("SELECT s.quantite, s.materiel_id, m.nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id WHERE s.id = ?");
             $stmt_current->execute([$stock_id]);
@@ -43,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $action_suffix = "";
 
-                // GESTION DU SURPLUS DEPUIS LA RÉSERVE (uniquement si ce n'est pas une réserve)
+                // GESTION DU SURPLUS DEPUIS LA RÉSERVE
                 if ($qty > $old_qty && !$est_res_dest) {
                     $diff = $qty - $old_qty;
 
@@ -70,19 +97,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                // On met à jour la quantité du sac
-                $pdo->prepare("UPDATE stocks SET quantite = :qty, date_peremption = :dp WHERE id = :id")->execute(['qty' => $qty, 'dp' => $date_p, 'id' => $stock_id]);
+                // NOUVEAU: On met à jour la quantité ET LA POCHE
+                $pdo->prepare("UPDATE stocks SET quantite = :qty, date_peremption = :dp, poche = :poche WHERE id = :id")->execute(['qty' => $qty, 'dp' => $date_p, 'poche' => $poche, 'id' => $stock_id]);
 
-                // Préparation de l'historique
                 if ($qty < $old_qty) {
                     $diff = $old_qty - $qty;
                     $action_texte = "A réduit la quantité de '" . $nom_mat_edit . "' (-$diff) (Lieu : " . $nom_du_lieu . ")";
                 } elseif ($qty > $old_qty) {
                     $action_texte = "A augmenté la quantité de '" . $nom_mat_edit . "' (Lieu : " . $nom_du_lieu . ")" . $action_suffix;
                 } else {
-                    $action_texte = "A mis à jour la péremption de '" . $nom_mat_edit . "' (Lieu : " . $nom_du_lieu . ")";
+                    $action_texte = "A mis à jour la fiche de '" . $nom_mat_edit . "' (Lieu : " . $nom_du_lieu . ")";
                 }
-                $_SESSION['flash_success'] = "✅ Quantité mise à jour.";
+                $_SESSION['flash_success'] = "✅ Fiche mise à jour.";
             }
             if (function_exists('logAction'))
                 logAction($pdo, $action_texte);
@@ -105,6 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $quantite = (int) $_POST['quantite'];
             $reserve_stock_id = $_POST['reserve_stock_id'] ?? 'manual';
             $date_peremption = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
+            $poche = trim($_POST['poche'] ?? ''); // NOUVEAU: Récupère la poche
 
             if ($materiel_id && $quantite > 0) {
                 $added_date = $date_peremption;
@@ -127,14 +154,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                $stmt_check = $pdo->prepare("SELECT id, quantite FROM stocks WHERE materiel_id = :mat AND lieu_id = :lieu AND IFNULL(date_peremption, '') = IFNULL(:peremp, '')");
-                $stmt_check->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'peremp' => $added_date]);
+                // On vérifie s'il existe déjà la même chose dans LA MÊME POCHE
+                $stmt_check = $pdo->prepare("SELECT id, quantite FROM stocks WHERE materiel_id = :mat AND lieu_id = :lieu AND IFNULL(date_peremption, '') = IFNULL(:peremp, '') AND IFNULL(poche, '') = IFNULL(:poche, '')");
+                $stmt_check->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'peremp' => $added_date, 'poche' => $poche]);
                 $stock_existant = $stmt_check->fetch();
 
                 if ($stock_existant) {
                     $pdo->prepare("UPDATE stocks SET quantite = :qty WHERE id = :id")->execute(['qty' => $stock_existant['quantite'] + $quantite, 'id' => $stock_existant['id']]);
                 } else {
-                    $pdo->prepare("INSERT INTO stocks (materiel_id, lieu_id, quantite, date_peremption) VALUES (:mat, :lieu, :qty, :peremp)")->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'qty' => $quantite, 'peremp' => $added_date]);
+                    $pdo->prepare("INSERT INTO stocks (materiel_id, lieu_id, quantite, date_peremption, poche) VALUES (:mat, :lieu, :qty, :peremp, :poche)")->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'qty' => $quantite, 'peremp' => $added_date, 'poche' => $poche]);
                 }
 
                 $nom_mat = $pdo->query("SELECT nom FROM materiels WHERE id = $materiel_id")->fetchColumn() ?: "Objet";
@@ -167,38 +195,23 @@ if (!$lieu) {
 }
 $est_reserve = $lieu['est_reserve'] == 1;
 
-// ==========================================
-// LOGIQUE DE SÉPARATION MATÉRIEL LOURD / RADIO
-// ==========================================
-// 1. On détecte si le lieu actuel est dédié aux radios
-$est_malle_radio = (stripos($lieu['nom'], 'radio') !== false);
+$est_malle_radio = estTypeRadio($lieu['nom']);
 
-// 2. On récupère le catalogue avec les noms de catégories
-$stmt_mat = $pdo->query("
-    SELECT m.id, m.nom, c.nom AS categorie_nom 
-    FROM materiels m 
-    JOIN categories c ON m.categorie_id = c.id 
-    ORDER BY c.nom, m.nom
-");
+$stmt_mat = $pdo->query("SELECT m.id, m.nom, c.nom AS categorie_nom FROM materiels m JOIN categories c ON m.categorie_id = c.id ORDER BY c.nom, m.nom");
 $tous_materiels = $stmt_mat->fetchAll();
 
-// 3. On filtre ce qui a le droit d'aller dans ce sac 
 $materiels = [];
 foreach ($tous_materiels as $mat) {
-    $cat_est_radio = (stripos($mat['categorie_nom'], 'radio') !== false);
-
-    // RÈGLE : Si c'est une malle radio, on n'accepte QUE les catégories "radio"
+    $cat_est_radio = estTypeRadio($mat['categorie_nom']);
     if ($est_malle_radio && $cat_est_radio) {
         $materiels[] = $mat;
-    }
-    // RÈGLE : Si c'est un sac normal, on n'accepte PAS les catégories "radio"
-    elseif (!$est_malle_radio && !$cat_est_radio) {
+    } elseif (!$est_malle_radio && !$cat_est_radio) {
         $materiels[] = $mat;
     }
 }
 
-// AJOUT DE s.materiel_id POUR LA SELECTION DE RESERVE
-$stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.materiel_id, s.quantite, s.date_peremption, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom, s.date_peremption");
+// NOUVEAU: Récupération de s.poche
+$stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.materiel_id, s.quantite, s.date_peremption, s.poche, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom, s.date_peremption");
 $stmt_stocks->execute(['lieu_id' => $lieu_id]);
 $stocks = $stmt_stocks->fetchAll();
 
@@ -216,6 +229,11 @@ if (!$est_reserve) {
 }
 
 $icone_affichage = !empty($lieu['icone']) ? $lieu['icone'] : '📦';
+$afficher_banniere_verrou = ($peut_editer && $est_verrouille);
+if ($est_verrouille) {
+    $peut_editer = false;
+}
+
 require_once 'includes/header.php';
 ?>
 
@@ -232,11 +250,23 @@ require_once 'includes/header.php';
             </h2>
         </div>
     </div>
-
+    <?php if (isset($afficher_banniere_verrou) && $afficher_banniere_verrou): ?>
+        <div class="alert alert-warning mb-30"
+            style="border-left: 5px solid #ff9800; background-color: #fff3e0; color: #e65100;">
+            <h3 style="margin-top: 0; color: #e65100;">🔒 Sac scellé pour un DPS</h3>
+            <p style="margin-bottom: 0;">Ce sac est validé pour le poste
+                "<strong><?php echo htmlspecialchars($dps_scelle['nom']); ?></strong>" prévu le
+                <strong><?php echo date('d/m/Y', strtotime($dps_scelle['date_evenement'])); ?></strong>.<br>
+                Les modifications de l'inventaire sont bloquées. Le sac sera automatiquement déverrouillé une fois la date
+                de l'événement passée.
+            </p>
+        </div>
+    <?php endif; ?>
     <?php if ($peut_editer): ?>
         <div class="form-box mb-30">
             <h3 class="mt-0 text-primary" style="font-size: 16px;">➕ Ajouter un nouveau matériel</h3>
             <form action="gestion_sac.php?lieu_id=<?php echo $lieu_id; ?>" method="POST" class="flex-row align-center">
+                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                 <input type="hidden" name="action" value="add_stock">
 
                 <div class="flex-2 min-w-200">
@@ -246,9 +276,24 @@ require_once 'includes/header.php';
                         <option value="">-- Sélectionner le matériel --</option>
                         <?php foreach ($materiels as $mat): ?>
                             <option value="<?php echo $mat['id']; ?>">
-                                <?php echo htmlspecialchars($mat['categorie_nom'] . ' - ' . $mat['nom']); ?></option>
+                                <?php echo htmlspecialchars($mat['categorie_nom'] . ' - ' . $mat['nom']); ?>
+                            </option>
                         <?php endforeach; ?>
                     </select>
+                </div>
+
+                <div class="flex-2 min-w-150" style="<?php echo ($est_reserve) ? 'display:none;' : ''; ?>">
+                    <label class="font-bold text-md mb-5 display-block" style="color: #1976D2;">🎒 Poche</label>
+                    <input type="text" name="poche" placeholder="Ex: Face avant..." class="input-field mb-0"
+                        list="liste-poches">
+                    <datalist id="liste-poches">
+                        <?php
+                        $stmt_poches = $pdo->query("SELECT DISTINCT poche FROM stocks WHERE lieu_id = $lieu_id AND poche != '' AND poche IS NOT NULL");
+                        while ($p = $stmt_poches->fetchColumn()) {
+                            echo "<option value=\"" . htmlspecialchars($p) . "\">";
+                        }
+                        ?>
+                    </datalist>
                 </div>
 
                 <?php if (!$est_reserve): ?>
@@ -330,6 +375,7 @@ require_once 'includes/header.php';
                                 <form id="form-edit-<?php echo $sid; ?>" method="POST"
                                     action="gestion_sac.php?lieu_id=<?php echo $lieu_id; ?>"
                                     onsubmit="return validateEdit(<?php echo $sid; ?>, <?php echo $est_reserve ? 'true' : 'false'; ?>)">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                     <input type="hidden" name="action" value="edit_stock">
                                     <input type="hidden" name="stock_id" value="<?php echo $sid; ?>">
                                 </form>
@@ -337,13 +383,30 @@ require_once 'includes/header.php';
 
                             <tr class="item-row" data-nom="<?php echo htmlspecialchars(strtolower($article['materiel_nom'])); ?>"
                                 data-peremp="<?php echo $raw_date; ?>" style="transition: background 0.2s;">
-                                <td class="font-bold text-dark"><?php echo htmlspecialchars($article['materiel_nom']); ?></td>
+
+                                <td class="font-bold text-dark">
+                                    <?php echo htmlspecialchars($article['materiel_nom']); ?>
+
+                                    <?php if (!empty($article['poche'])): ?>
+                                        <div class="view-mode-<?php echo $sid; ?> text-sm mt-5" style="color: #1976D2;">
+                                            🎒 <?php echo htmlspecialchars($article['poche']); ?>
+                                        </div>
+                                    <?php endif; ?>
+
+                                    <?php if ($peut_editer): ?>
+                                        <input class="edit-mode-<?php echo $sid; ?> input-field mt-5" type="text"
+                                            form="form-edit-<?php echo $sid; ?>" name="poche"
+                                            value="<?php echo htmlspecialchars($article['poche']); ?>"
+                                            placeholder="Rangé dans la poche..." list="liste-poches"
+                                            style="display:none; padding: 5px; width: 90%; font-size: 12px;">
+                                    <?php endif; ?>
+                                </td>
 
                                 <td class="text-center text-muted">
                                     <span class="view-mode-<?php echo $sid; ?>"><?php echo $affichage_date; ?></span>
                                     <?php if ($peut_editer): ?><input class="edit-mode-<?php echo $sid; ?> input-field" type="date"
                                             form="form-edit-<?php echo $sid; ?>" name="date_peremption" value="<?php echo $raw_date; ?>"
-                                            style="display:none; padding: 5px;"><?php endif; ?>
+                                            style="display:none; padding: 5px; margin: 0 auto;"><?php endif; ?>
                                 </td>
 
                                 <td class="text-center text-xl">
@@ -365,6 +428,7 @@ require_once 'includes/header.php';
                                                 title="Modifier">✏️</button>
                                             <form method="POST" style="margin: 0;"
                                                 onsubmit="return confirm('Retirer définitivement cet objet ?');">
+                                                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                                 <input type="hidden" name="action" value="delete_stock">
                                                 <input type="hidden" name="stock_id" value="<?php echo $sid; ?>">
                                                 <button type="submit" class="btn-icon text-muted" title="Supprimer">🗑️</button>

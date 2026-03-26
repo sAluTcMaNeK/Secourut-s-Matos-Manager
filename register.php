@@ -7,6 +7,11 @@ $error = '';
 $success = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // --- VÉRIFICATION DU JETON CSRF ---
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
+        die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité (Jeton CSRF invalide ou expiré). Veuillez recharger la page.</div>");
+    }
+    // ----------------------------------
     $username = trim($_POST['username']);
     $password = $_POST['password'];
     $password_confirm = $_POST['password_confirm'];
@@ -124,6 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <?php if (!$success): ?>
             <form method="POST">
+                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                 <div style="text-align: left;"><label
                         style="font-weight: bold; color: #333; display: block; margin-bottom: 8px;">Nom
                         d'utilisateur</label>

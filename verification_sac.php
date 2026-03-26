@@ -2,6 +2,7 @@
 // verification_sac.php
 require_once 'includes/auth.php';
 require_once 'config/db.php';
+require_once 'includes/functions.php';
 
 $event_id = isset($_GET['event_id']) ? (int) $_GET['event_id'] : 0;
 $lieu_id = isset($_GET['lieu_id']) ? (int) $_GET['lieu_id'] : 0;
@@ -23,10 +24,10 @@ $lieu = $stmt_lieu->fetch();
 if (!$event || !$lieu)
     die("Paramètres invalides.");
 
-// --- LOGIQUE MATÉRIEL LOURD (Radios & DSA) ---
-$est_malle_radio = (stripos($lieu['nom'], 'radio') !== false);
-$est_sac_dsa = (stripos($lieu['nom'], 'dsa') !== false || stripos($lieu['nom'], 'defibrillateur') !== false || stripos($lieu['nom'], 'défibrillateur') !== false);
-// ---------------------------------------------
+// --- LOGIQUE MATÉRIEL LOURD ---
+$est_malle_radio = estTypeRadio($lieu['nom']);
+$est_sac_dsa = estTypeDSA($lieu['nom']);
+// ------------------------------
 
 $stmt_link = $pdo->prepare("SELECT statut FROM evenements_lieux WHERE evenement_id = ? AND lieu_id = ?");
 $stmt_link->execute([$event_id, $lieu_id]);
@@ -41,6 +42,12 @@ if ($liaison['statut'] === 'valide') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_verification'])) {
+    // --- VÉRIFICATION DU JETON CSRF ---
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
+        die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité (Jeton CSRF invalide ou expiré). Veuillez recharger la page.</div>");
+    }
+    // ----------------------------------
+
     $comptages = $_POST['stock'] ?? [];
     try {
         $pdo->beginTransaction();
@@ -98,13 +105,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_verification'
     }
 }
 
-$stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.quantite, s.date_peremption, m.id AS materiel_id, m.nom AS materiel_nom, m.check_fonctionnel, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = ? ORDER BY c.nom, m.nom");
+// NOUVEAU: Requête de récupération avec tri intelligent (Poche en premier)
+$stmt_stocks = $pdo->prepare("
+    SELECT s.id as stock_id, s.quantite, s.date_peremption, s.poche, 
+           m.id AS materiel_id, m.nom AS materiel_nom, m.check_fonctionnel, c.nom AS categorie_nom 
+    FROM stocks s 
+    JOIN materiels m ON s.materiel_id = m.id 
+    JOIN categories c ON m.categorie_id = c.id 
+    WHERE s.lieu_id = ? 
+    ORDER BY CASE WHEN s.poche = '' OR s.poche IS NULL THEN 1 ELSE 0 END, s.poche ASC, c.nom ASC, m.nom ASC
+");
 $stmt_stocks->execute([$lieu_id]);
 $stocks = $stmt_stocks->fetchAll();
 
-$stocks_par_categorie = [];
+// NOUVEAU: Regroupement par poche, puis par catégorie
+$stocks_par_groupe = [];
 foreach ($stocks as $s) {
-    $stocks_par_categorie[$s['categorie_nom']][] = $s;
+    if (!empty($s['poche'])) {
+        $nom_groupe = "🎒 Poche : " . $s['poche'];
+    } else {
+        $nom_groupe = "📦 " . $s['categorie_nom'];
+    }
+    $stocks_par_groupe[$nom_groupe][] = $s;
 }
 
 $stmt_reserves = $pdo->query("SELECT s.id as reserve_stock_id, s.materiel_id, s.quantite, s.date_peremption, l.nom as lieu_nom FROM stocks s JOIN lieux_stockage l ON s.lieu_id = l.id WHERE l.est_reserve = 1 AND s.quantite > 0 ORDER BY s.date_peremption ASC");
@@ -137,6 +159,7 @@ require_once 'includes/header.php';
 
 <form id="form-verification" method="POST"
     action="verification_sac.php?event_id=<?php echo $event_id; ?>&lieu_id=<?php echo $lieu_id; ?>">
+    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
     <input type="hidden" name="valider_verification" value="1">
 
     <div class="alert alert-warning mb-25">
@@ -152,15 +175,24 @@ require_once 'includes/header.php';
         </ul>
     </div>
 
-    <?php if (empty($stocks_par_categorie)): ?>
+    <?php if (empty($stocks_par_groupe)): ?>
         <p class="text-center text-muted font-italic">Ce sac est actuellement vide dans la base de données.</p>
     <?php else: ?>
-        <?php foreach ($stocks_par_categorie as $categorie => $articles): ?>
+        <?php foreach ($stocks_par_groupe as $nom_groupe => $articles): ?>
             <div class="category-block mb-30" style="box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
-                <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
+
+                <?php
+                // NOUVEAU: Gestion des couleurs de l'en-tête (Poche = Bleu, Reste = Couleur Classique)
+                if (strpos($nom_groupe, 'Poche') !== false) {
+                    $couleur = ['bg' => '#1976D2', 'text' => 'white'];
+                } else {
+                    $cat_pure = str_replace('📦 ', '', $nom_groupe);
+                    $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($cat_pure) : ['bg' => '#2c3e50', 'text' => 'white'];
+                }
+                ?>
                 <h3 class="category-header"
                     style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                    <?php echo htmlspecialchars($categorie); ?>
+                    <?php echo htmlspecialchars($nom_groupe); ?>
                 </h3>
 
                 <table class="table-manager" style="width: 100%; border-collapse: collapse;">
@@ -180,10 +212,8 @@ require_once 'includes/header.php';
                             $est_perime = false;
                             $texte_peremption = '-';
 
-                            // Détections
-                            $nom_mat_lower = strtolower($art['materiel_nom']);
-                            $est_item_radio = ($est_malle_radio && (strpos($nom_mat_lower, 'radio') !== false || strpos($nom_mat_lower, 'talkie') !== false));
-                            $est_item_dsa = ($est_sac_dsa && (strpos($nom_mat_lower, 'dsa') !== false || strpos($nom_mat_lower, 'defibrillateur') !== false || strpos($nom_mat_lower, 'défibrillateur') !== false));
+                            $est_item_radio = ($est_malle_radio && estTypeRadio($art['materiel_nom']));
+                            $est_item_dsa = ($est_sac_dsa && estTypeDSA($art['materiel_nom']));
                             $est_item_check = ($art['check_fonctionnel'] == 1);
 
                             $est_item_special = ($est_item_radio || $est_item_dsa || $est_item_check);

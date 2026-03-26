@@ -12,6 +12,11 @@ $action = $_GET['action'] ?? 'dashboard';
 // 1. TRAITEMENT DES ACTIONS (CRÉER, MODIFIER, SUPPRIMER)
 // ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // --- VÉRIFICATION DU JETON CSRF ---
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
+        die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité (Jeton CSRF invalide ou expiré). Veuillez recharger la page.</div>");
+    }
+    // ----------------------------------
 
     // SÉCURITÉ : Seuls les admins peuvent faire ces actions
     if (!$est_admin) {
@@ -130,7 +135,8 @@ if ($action === 'dashboard') {
                 <h2 id="form_titre"
                     style="margin-top: 0; color: #d32f2f; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">🚑 Planifier
                     un DPS</h2>
-                <form action="remplissage.php" method="POST" id="form_dps">
+                <form action="" method="POST" id="form_dps">
+                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                     <input type="hidden" name="action" value="create_event" id="form_action">
                     <input type="hidden" name="event_id" value="" id="form_event_id">
 
@@ -230,8 +236,9 @@ if ($action === 'dashboard') {
                                             style="background: none; border: 1px solid #ccc; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight:bold; color: #333;">✏️
                                             Modifier</button>
 
-                                        <form method="POST" style="margin: 0;"
+                                        <form method="POST" action="" style="margin: 0;"
                                             onsubmit="return confirm('Supprimer définitivement ce DPS ? Toutes les données de vérification associées seront perdues.');">
+                                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                             <input type="hidden" name="action" value="delete_event">
                                             <input type="hidden" name="event_id" value="<?php echo $ev['id']; ?>">
                                             <button type="submit"

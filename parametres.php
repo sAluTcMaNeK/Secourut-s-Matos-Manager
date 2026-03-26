@@ -10,6 +10,11 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // --- VÉRIFICATION DU JETON CSRF ---
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
+        die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité (Jeton CSRF invalide ou expiré). Veuillez recharger la page.</div>");
+    }
+    // ----------------------------------
     $action = $_POST['action'] ?? '';
     try {
         if ($action === 'add_cat') {
@@ -107,6 +112,7 @@ require_once 'includes/header.php';
         <h3 class="section-title">🏷️ Catégories de Matériel</h3>
 
         <form method="POST" action="parametres.php" class="flex-center form-box mb-20">
+            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
             <input type="hidden" name="action" value="add_cat">
             <input type="text" name="nom" placeholder="Nouvelle catégorie" required class="input-field flex-2 mb-0">
             <input type="color" name="couleur_fond" value="#2c3e50" title="Fond"
@@ -121,6 +127,7 @@ require_once 'includes/header.php';
                     <?php foreach ($categories as $cat): ?>
                         <tr>
                             <form method="POST" action="parametres.php">
+                                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                 <input type="hidden" name="action" value="edit_cat">
                                 <input type="hidden" name="id" value="<?php echo $cat['id']; ?>">
                                 <td style="width: 40%;">
@@ -137,6 +144,7 @@ require_once 'includes/header.php';
                             </form>
                             <form method="POST" action="parametres.php" onsubmit="return confirm('Supprimer ?');"
                                 class="mb-0">
+                                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                 <input type="hidden" name="action" value="delete_cat">
                                 <input type="hidden" name="id" value="<?php echo $cat['id']; ?>">
                                 <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
@@ -155,6 +163,7 @@ require_once 'includes/header.php';
         <h3 class="section-title">📋 Types de Stockage</h3>
 
         <form method="POST" action="parametres.php" class="flex-row-sm align-center mb-15">
+            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
             <input type="hidden" name="action" value="add_type">
             <input type="text" name="nom" placeholder="Ex: Boîte Pharmacie" required
                 class="input-field flex-1 min-w-150 mb-0">
@@ -166,6 +175,7 @@ require_once 'includes/header.php';
                 <?php foreach ($types_lieux as $type): ?>
                     <tr>
                         <form method="POST" action="parametres.php">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                             <input type="hidden" name="action" value="edit_type">
                             <input type="hidden" name="id" value="<?php echo $type['id']; ?>">
                             <td class="font-bold text-dark" style="width: 60%;">
@@ -178,6 +188,7 @@ require_once 'includes/header.php';
                         </form>
                         <form method="POST" action="parametres.php" onsubmit="return confirm('Supprimer ce type ?');"
                             class="mb-0">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                             <input type="hidden" name="action" value="delete_type">
                             <input type="hidden" name="id" value="<?php echo $type['id']; ?>">
                             <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
@@ -193,6 +204,7 @@ require_once 'includes/header.php';
 <div class="white-box mb-0">
     <h3 class="section-title">🖼️ Icônes disponibles</h3>
     <form method="POST" action="parametres.php" class="flex-center mb-15">
+        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
         <input type="hidden" name="action" value="add_icone">
         <input type="text" name="icone" placeholder="Emoji (ex: 🩸)" required class="input-field flex-1 mb-0">
         <button type="submit" class="btn btn-success-dark">Ajouter</button>
@@ -200,6 +212,7 @@ require_once 'includes/header.php';
     <div class="flex-row-sm">
         <?php foreach ($icones as $ic): ?>
             <form method="POST" action="parametres.php" onsubmit="return confirm('Supprimer ?');" class="mb-0">
+                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                 <input type="hidden" name="action" value="delete_icone">
                 <input type="hidden" name="id" value="<?php echo $ic['id']; ?>">
                 <button type="submit" title="Cliquez pour supprimer" class="btn-outline-primary"

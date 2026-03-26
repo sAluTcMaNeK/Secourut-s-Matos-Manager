@@ -2,6 +2,7 @@
 // inventaire.php
 require_once 'includes/auth.php';
 require_once 'config/db.php';
+require_once 'includes/functions.php';
 
 $message = '';
 $action = $_GET['action'] ?? 'resume';
@@ -11,28 +12,290 @@ $stmt_actif = $pdo->query("SELECT * FROM inventaires WHERE statut = 'en_cours' O
 $inventaire_actif = $stmt_actif->fetch();
 
 // ==========================================
-// 2. TRAITEMENT DES ACTIONS
+// 2A. TRAITEMENT EXPORT EXCEL (ÉTAT ACTUEL)
 // ==========================================
 if ($action === 'export_xls') {
     header("Content-Type: application/vnd.ms-excel; charset=utf-8");
-    header("Content-Disposition: attachment; filename=Inventaire_Complet_" . date('Y-m-d') . ".xls");
-    echo "\xEF\xBB\xBF";
-    echo "<table border='1' style='border-collapse: collapse; font-family: Arial, sans-serif;'>";
-    echo "<tr style='background-color: #2c3e50; color: #ffffff; font-weight: bold;'><th style='padding: 10px;'>Lieu de Stockage</th><th style='padding: 10px;'>Catégorie</th><th style='padding: 10px;'>Nom du Matériel</th><th style='padding: 10px;'>Date de Péremption</th><th style='padding: 10px;'>Quantité</th></tr>";
+    header("Content-Disposition: attachment; filename=Etat_Des_Stocks_" . date('Y-m-d') . ".xls");
 
-    $stmt_export = $pdo->query("SELECT l.nom AS lieu_nom, c.nom AS categorie_nom, m.nom AS materiel_nom, s.date_peremption, s.quantite FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id JOIN lieux_stockage l ON s.lieu_id = l.id ORDER BY l.nom, c.nom, m.nom");
-    while ($row = $stmt_export->fetch(PDO::FETCH_ASSOC)) {
-        $date_p = $row['date_peremption'] ? date('d/m/Y', strtotime($row['date_peremption'])) : 'Aucune';
-        echo "<tr><td style='padding: 5px;'>" . htmlspecialchars($row['lieu_nom']) . "</td><td style='padding: 5px;'>" . htmlspecialchars($row['categorie_nom']) . "</td><td style='padding: 5px;'>" . htmlspecialchars($row['materiel_nom']) . "</td><td style='padding: 5px; text-align: center;'>" . htmlspecialchars($date_p) . "</td><td style='padding: 5px; text-align: center; font-weight: bold;'>" . htmlspecialchars($row['quantite']) . "</td></tr>";
+    echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+    echo '<?mso-application progid="Excel.Sheet"?>' . "\n";
+    echo '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' . "\n";
+
+    echo '  <Styles>
+                <Style ss:ID="Default" ss:Name="Normal">
+                    <Alignment ss:Vertical="Center"/>
+                </Style>
+                <Style ss:ID="Header">
+                    <Font ss:Bold="1" ss:Color="#FFFFFF"/>
+                    <Interior ss:Color="#2c3e50" ss:Pattern="Solid"/>
+                    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+                </Style>
+            </Styles>' . "\n";
+
+    $stmt_export = $pdo->query("
+        SELECT l.nom AS lieu_nom, l.type AS lieu_type, c.nom AS categorie_nom, m.nom AS materiel_nom, s.poche, s.date_peremption, s.quantite 
+        FROM stocks s 
+        JOIN materiels m ON s.materiel_id = m.id 
+        JOIN categories c ON m.categorie_id = c.id 
+        JOIN lieux_stockage l ON s.lieu_id = l.id 
+        ORDER BY l.type, l.nom, s.poche, c.nom, m.nom
+    ");
+    $all_stocks = $stmt_export->fetchAll(PDO::FETCH_ASSOC);
+
+    $data_by_type = [];
+    foreach ($all_stocks as $row) {
+        $t = !empty($row['lieu_type']) ? $row['lieu_type'] : 'Autre';
+        if ($t === 'sac_inter')
+            $t = 'Sacs Intervention';
+        elseif ($t === 'sac_log')
+            $t = 'Sacs Logistique';
+        elseif ($t === 'reserve')
+            $t = 'Réserves';
+        $data_by_type[$t][] = $row;
     }
-    echo "</table>";
+
+    if (empty($data_by_type)) {
+        echo '  <Worksheet ss:Name="Vide"><Table><Row><Cell><Data ss:Type="String">Aucun stock disponible</Data></Cell></Row></Table></Worksheet>' . "\n";
+    } else {
+        foreach ($data_by_type as $type => $rows) {
+            $sheet_name = substr(str_replace(['/', '\\', '?', '*', ':', '[', ']'], '_', $type), 0, 31);
+            echo '  <Worksheet ss:Name="' . htmlspecialchars($sheet_name) . '">' . "\n";
+            echo '    <Table>' . "\n";
+            echo '      <Row>' . "\n";
+            echo '        <Cell ss:Index="1" ss:StyleID="Header"><Data ss:Type="String">Lieu de stockage</Data></Cell>' . "\n";
+            echo '        <Cell ss:Index="2" ss:StyleID="Header"><Data ss:Type="String">Emplacement / Poche</Data></Cell>' . "\n";
+            echo '        <Cell ss:Index="3" ss:StyleID="Header"><Data ss:Type="String">Catégorie Matériel</Data></Cell>' . "\n";
+            echo '        <Cell ss:Index="4" ss:StyleID="Header"><Data ss:Type="String">Matériel</Data></Cell>' . "\n";
+            echo '        <Cell ss:Index="5" ss:StyleID="Header"><Data ss:Type="String">Péremption</Data></Cell>' . "\n";
+            echo '        <Cell ss:Index="6" ss:StyleID="Header"><Data ss:Type="String">Quantité</Data></Cell>' . "\n";
+            echo '      </Row>' . "\n";
+
+            $spans = [];
+            $n = count($rows);
+            $colKeys = ['lieu_nom', 'poche', 'categorie_nom', 'materiel_nom'];
+            for ($i = 0; $i < $n; $i++)
+                $spans[$i] = ['lieu_nom' => 1, 'poche' => 1, 'categorie_nom' => 1, 'materiel_nom' => 1];
+
+            for ($col = 0; $col < 4; $col++) {
+                $key = $colKeys[$col];
+                $startIdx = 0;
+                while ($startIdx < $n) {
+                    $parentVal = '';
+                    for ($p = 0; $p <= $col; $p++)
+                        $parentVal .= ($rows[$startIdx][$colKeys[$p]] ?? '') . '|';
+                    $count = 1;
+                    for ($j = $startIdx + 1; $j < $n; $j++) {
+                        $currentParentVal = '';
+                        for ($p = 0; $p <= $col; $p++)
+                            $currentParentVal .= ($rows[$j][$colKeys[$p]] ?? '') . '|';
+                        if ($currentParentVal === $parentVal) {
+                            $count++;
+                            $spans[$j][$key] = 0;
+                        } else
+                            break;
+                    }
+                    $spans[$startIdx][$key] = $count;
+                    $startIdx += $count;
+                }
+            }
+
+            foreach ($rows as $i => $r) {
+                echo '      <Row>' . "\n";
+                if ($spans[$i]['lieu_nom'] > 0) {
+                    $merge = $spans[$i]['lieu_nom'] > 1 ? ' ss:MergeDown="' . ($spans[$i]['lieu_nom'] - 1) . '"' : '';
+                    echo '        <Cell ss:Index="1"' . $merge . '><Data ss:Type="String">' . htmlspecialchars($r['lieu_nom']) . '</Data></Cell>' . "\n";
+                }
+                if ($spans[$i]['poche'] > 0) {
+                    $merge = $spans[$i]['poche'] > 1 ? ' ss:MergeDown="' . ($spans[$i]['poche'] - 1) . '"' : '';
+                    echo '        <Cell ss:Index="2"' . $merge . '><Data ss:Type="String">' . htmlspecialchars($r['poche'] ?? '') . '</Data></Cell>' . "\n";
+                }
+                if ($spans[$i]['categorie_nom'] > 0) {
+                    $merge = $spans[$i]['categorie_nom'] > 1 ? ' ss:MergeDown="' . ($spans[$i]['categorie_nom'] - 1) . '"' : '';
+                    echo '        <Cell ss:Index="3"' . $merge . '><Data ss:Type="String">' . htmlspecialchars($r['categorie_nom']) . '</Data></Cell>' . "\n";
+                }
+                if ($spans[$i]['materiel_nom'] > 0) {
+                    $merge = $spans[$i]['materiel_nom'] > 1 ? ' ss:MergeDown="' . ($spans[$i]['materiel_nom'] - 1) . '"' : '';
+                    echo '        <Cell ss:Index="4"' . $merge . '><Data ss:Type="String">' . htmlspecialchars($r['materiel_nom']) . '</Data></Cell>' . "\n";
+                }
+                $date_p = $r['date_peremption'] ? date('d/m/Y', strtotime($r['date_peremption'])) : 'Aucune';
+                echo '        <Cell ss:Index="5"><Data ss:Type="String">' . htmlspecialchars($date_p) . '</Data></Cell>' . "\n";
+                echo '        <Cell ss:Index="6"><Data ss:Type="Number">' . htmlspecialchars($r['quantite']) . '</Data></Cell>' . "\n";
+                echo '      </Row>' . "\n";
+            }
+            echo '    </Table>' . "\n";
+            echo '  </Worksheet>' . "\n";
+        }
+    }
+    echo '</Workbook>';
+    exit;
+}
+
+// ==========================================
+// 2B. TRAITEMENT EXPORT EXCEL (RAPPORT HISTORIQUE)
+// ==========================================
+if ($action === 'export_rapport_xls' && isset($_GET['id'])) {
+    $inv_id = (int) $_GET['id'];
+    $stmt_inv = $pdo->prepare("SELECT * FROM inventaires WHERE id = ?");
+    $stmt_inv->execute([$inv_id]);
+    $inv = $stmt_inv->fetch();
+
+    if (!$inv)
+        die("Rapport introuvable.");
+
+    header("Content-Type: application/vnd.ms-excel; charset=utf-8");
+    header("Content-Disposition: attachment; filename=Rapport_Inventaire_" . date('Y-m-d', strtotime($inv['date_fin'])) . ".xls");
+
+    echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+    echo '<?mso-application progid="Excel.Sheet"?>' . "\n";
+    echo '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' . "\n";
+
+    echo '  <Styles>
+                <Style ss:ID="Default" ss:Name="Normal">
+                    <Alignment ss:Vertical="Center"/>
+                </Style>
+                <Style ss:ID="Header">
+                    <Font ss:Bold="1" ss:Color="#FFFFFF"/>
+                    <Interior ss:Color="#2c3e50" ss:Pattern="Solid"/>
+                    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+                </Style>
+                <Style ss:ID="Bad"><Font ss:Bold="1" ss:Color="#c62828"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/></Style>
+                <Style ss:ID="Good"><Font ss:Bold="1" ss:Color="#2e7d32"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/></Style>
+                <Style ss:ID="Center"><Alignment ss:Horizontal="Center" ss:Vertical="Center"/></Style>
+            </Styles>' . "\n";
+
+    // --- ONGLET 1 : LES ÉCARTS CONSTATÉS ---
+    $stmt_diffs = $pdo->prepare("SELECT h.*, l.nom AS lieu_nom, m.nom AS materiel_nom, c.nom AS categorie_nom FROM historique_comptages h JOIN lieux_stockage l ON h.lieu_id = l.id JOIN materiels m ON h.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE h.inventaire_id = ? ORDER BY l.nom, c.nom, m.nom");
+    $stmt_diffs->execute([$inv_id]);
+    $diffs = $stmt_diffs->fetchAll(PDO::FETCH_ASSOC);
+
+    echo '  <Worksheet ss:Name="1 - Écarts Constatés">' . "\n";
+    echo '    <Table>' . "\n";
+    echo '      <Column ss:Width="150"/> <Column ss:Width="120"/> <Column ss:Width="200"/> <Column ss:Width="70"/> <Column ss:Width="70"/> <Column ss:Width="70"/> <Column ss:Width="250"/>' . "\n";
+    echo '      <Row>' . "\n";
+    echo '        <Cell ss:StyleID="Header"><Data ss:Type="String">Lieu</Data></Cell>' . "\n";
+    echo '        <Cell ss:StyleID="Header"><Data ss:Type="String">Catégorie</Data></Cell>' . "\n";
+    echo '        <Cell ss:StyleID="Header"><Data ss:Type="String">Matériel</Data></Cell>' . "\n";
+    echo '        <Cell ss:StyleID="Header"><Data ss:Type="String">Qté Avant</Data></Cell>' . "\n";
+    echo '        <Cell ss:StyleID="Header"><Data ss:Type="String">Qté Après</Data></Cell>' . "\n";
+    echo '        <Cell ss:StyleID="Header"><Data ss:Type="String">Écart</Data></Cell>' . "\n";
+    echo '        <Cell ss:StyleID="Header"><Data ss:Type="String">Détails / Action corrective</Data></Cell>' . "\n";
+    echo '      </Row>' . "\n";
+
+    if (empty($diffs)) {
+        echo '      <Row><Cell><Data ss:Type="String">Aucun écart constaté lors de cet inventaire.</Data></Cell></Row>' . "\n";
+    } else {
+        foreach ($diffs as $d) {
+            $ecart = $d['qte_apres'] - $d['qte_avant'];
+            $styleEcart = $ecart > 0 ? 'Good' : 'Bad';
+            $signe = $ecart > 0 ? '+' : '';
+            echo '      <Row>' . "\n";
+            echo '        <Cell><Data ss:Type="String">' . htmlspecialchars($d['lieu_nom']) . '</Data></Cell>' . "\n";
+            echo '        <Cell><Data ss:Type="String">' . htmlspecialchars($d['categorie_nom']) . '</Data></Cell>' . "\n";
+            echo '        <Cell><Data ss:Type="String">' . htmlspecialchars($d['materiel_nom']) . '</Data></Cell>' . "\n";
+            echo '        <Cell ss:StyleID="Center"><Data ss:Type="Number">' . htmlspecialchars($d['qte_avant']) . '</Data></Cell>' . "\n";
+            echo '        <Cell ss:StyleID="Center"><Data ss:Type="Number">' . htmlspecialchars($d['qte_apres']) . '</Data></Cell>' . "\n";
+            echo '        <Cell ss:StyleID="' . $styleEcart . '"><Data ss:Type="String">' . $signe . $ecart . '</Data></Cell>' . "\n";
+            echo '        <Cell><Data ss:Type="String">' . htmlspecialchars($d['action_corrective'] ?? 'Ajustement manuel') . '</Data></Cell>' . "\n";
+            echo '      </Row>' . "\n";
+        }
+    }
+    echo '    </Table>' . "\n";
+    echo '  </Worksheet>' . "\n";
+
+    // --- ONGLET 2+ : LE STOCK FINAL DU RAPPORT (Même DA que l'état actuel) ---
+    $stmt_export = $pdo->query("SELECT l.nom AS lieu_nom, l.type AS lieu_type, c.nom AS categorie_nom, m.nom AS materiel_nom, s.poche, s.date_peremption, s.quantite FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id JOIN lieux_stockage l ON s.lieu_id = l.id ORDER BY l.type, l.nom, s.poche, c.nom, m.nom");
+    $all_stocks = $stmt_export->fetchAll(PDO::FETCH_ASSOC);
+
+    $data_by_type = [];
+    foreach ($all_stocks as $row) {
+        $t = !empty($row['lieu_type']) ? $row['lieu_type'] : 'Autre';
+        if ($t === 'sac_inter')
+            $t = 'Sacs Intervention';
+        elseif ($t === 'sac_log')
+            $t = 'Sacs Logistique';
+        elseif ($t === 'reserve')
+            $t = 'Réserves';
+        $data_by_type[$t][] = $row;
+    }
+
+    foreach ($data_by_type as $type => $rows) {
+        $sheet_name = substr(str_replace(['/', '\\', '?', '*', ':', '[', ']'], '_', $type), 0, 31);
+        echo '  <Worksheet ss:Name="' . htmlspecialchars($sheet_name) . '">' . "\n";
+        echo '    <Table>' . "\n";
+        echo '      <Row>' . "\n";
+        echo '        <Cell ss:Index="1" ss:StyleID="Header"><Data ss:Type="String">Lieu de stockage</Data></Cell>' . "\n";
+        echo '        <Cell ss:Index="2" ss:StyleID="Header"><Data ss:Type="String">Emplacement / Poche</Data></Cell>' . "\n";
+        echo '        <Cell ss:Index="3" ss:StyleID="Header"><Data ss:Type="String">Catégorie Matériel</Data></Cell>' . "\n";
+        echo '        <Cell ss:Index="4" ss:StyleID="Header"><Data ss:Type="String">Matériel</Data></Cell>' . "\n";
+        echo '        <Cell ss:Index="5" ss:StyleID="Header"><Data ss:Type="String">Péremption</Data></Cell>' . "\n";
+        echo '        <Cell ss:Index="6" ss:StyleID="Header"><Data ss:Type="String">Quantité</Data></Cell>' . "\n";
+        echo '      </Row>' . "\n";
+
+        $spans = [];
+        $n = count($rows);
+        $colKeys = ['lieu_nom', 'poche', 'categorie_nom', 'materiel_nom'];
+        for ($i = 0; $i < $n; $i++)
+            $spans[$i] = ['lieu_nom' => 1, 'poche' => 1, 'categorie_nom' => 1, 'materiel_nom' => 1];
+
+        for ($col = 0; $col < 4; $col++) {
+            $key = $colKeys[$col];
+            $startIdx = 0;
+            while ($startIdx < $n) {
+                $parentVal = '';
+                for ($p = 0; $p <= $col; $p++)
+                    $parentVal .= ($rows[$startIdx][$colKeys[$p]] ?? '') . '|';
+                $count = 1;
+                for ($j = $startIdx + 1; $j < $n; $j++) {
+                    $currentParentVal = '';
+                    for ($p = 0; $p <= $col; $p++)
+                        $currentParentVal .= ($rows[$j][$colKeys[$p]] ?? '') . '|';
+                    if ($currentParentVal === $parentVal) {
+                        $count++;
+                        $spans[$j][$key] = 0;
+                    } else
+                        break;
+                }
+                $spans[$startIdx][$key] = $count;
+                $startIdx += $count;
+            }
+        }
+
+        foreach ($rows as $i => $r) {
+            echo '      <Row>' . "\n";
+            if ($spans[$i]['lieu_nom'] > 0) {
+                $merge = $spans[$i]['lieu_nom'] > 1 ? ' ss:MergeDown="' . ($spans[$i]['lieu_nom'] - 1) . '"' : '';
+                echo '        <Cell ss:Index="1"' . $merge . '><Data ss:Type="String">' . htmlspecialchars($r['lieu_nom']) . '</Data></Cell>' . "\n";
+            }
+            if ($spans[$i]['poche'] > 0) {
+                $merge = $spans[$i]['poche'] > 1 ? ' ss:MergeDown="' . ($spans[$i]['poche'] - 1) . '"' : '';
+                echo '        <Cell ss:Index="2"' . $merge . '><Data ss:Type="String">' . htmlspecialchars($r['poche'] ?? '') . '</Data></Cell>' . "\n";
+            }
+            if ($spans[$i]['categorie_nom'] > 0) {
+                $merge = $spans[$i]['categorie_nom'] > 1 ? ' ss:MergeDown="' . ($spans[$i]['categorie_nom'] - 1) . '"' : '';
+                echo '        <Cell ss:Index="3"' . $merge . '><Data ss:Type="String">' . htmlspecialchars($r['categorie_nom']) . '</Data></Cell>' . "\n";
+            }
+            if ($spans[$i]['materiel_nom'] > 0) {
+                $merge = $spans[$i]['materiel_nom'] > 1 ? ' ss:MergeDown="' . ($spans[$i]['materiel_nom'] - 1) . '"' : '';
+                echo '        <Cell ss:Index="4"' . $merge . '><Data ss:Type="String">' . htmlspecialchars($r['materiel_nom']) . '</Data></Cell>' . "\n";
+            }
+            $date_p = $r['date_peremption'] ? date('d/m/Y', strtotime($r['date_peremption'])) : 'Aucune';
+            echo '        <Cell ss:Index="5"><Data ss:Type="String">' . htmlspecialchars($date_p) . '</Data></Cell>' . "\n";
+            echo '        <Cell ss:Index="6"><Data ss:Type="Number">' . htmlspecialchars($r['quantite']) . '</Data></Cell>' . "\n";
+            echo '      </Row>' . "\n";
+        }
+        echo '    </Table>' . "\n";
+        echo '  </Worksheet>' . "\n";
+    }
+
+    echo '</Workbook>';
     exit;
 }
 
 if ($action === 'lancer' && !$inventaire_actif && $peut_editer) {
     $pdo->exec("INSERT INTO inventaires (date_debut) VALUES (NOW())");
     logAction($pdo, "A lancé un nouvel inventaire global");
-    header("Location: inventaire.php");
+    header("Location: inventaire");
     exit;
 }
 
@@ -40,11 +303,15 @@ if ($action === 'cloturer' && $inventaire_actif && $peut_editer) {
     $stmt = $pdo->prepare("UPDATE inventaires SET statut = 'termine', date_fin = NOW() WHERE id = ?");
     $stmt->execute([$inventaire_actif['id']]);
     logAction($pdo, "A clôturé l'inventaire global");
-    header("Location: inventaire.php?msg=cloture");
+    header("Location: inventaire?msg=cloture");
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_lieu']) && $inventaire_actif) {
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
+        die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité (Jeton CSRF invalide ou expiré). Veuillez recharger la page.</div>");
+    }
+
     if (!$peut_editer)
         die("🛑 Action bloquée.");
     $inv_id = $inventaire_actif['id'];
@@ -139,7 +406,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_lieu']) && $i
     }
     $pdo->prepare("INSERT OR IGNORE INTO inventaires_lieux (inventaire_id, lieu_id) VALUES (?, ?)")->execute([$inv_id, $lieu_id]);
     logAction($pdo, "A inventorié le lieu : " . $lieu_info['nom']);
-    header("Location: inventaire.php?msg=lieu_valide");
+    header("Location: inventaire?msg=lieu_valide");
     exit;
 }
 
@@ -244,14 +511,15 @@ if ($action === 'rapport') {
         <div class="print-header"><img src="assets/img/favicon.png" alt="Logo Secourut's">MATOS MANAGER</div>
         <div class="flex-between-start border-bottom pb-15 mb-20">
             <div>
-                <a href="inventaire.php" class="no-print text-muted text-md" style="text-decoration: none;">⬅ Retour au
+                <a href="inventaire" class="no-print text-muted text-md" style="text-decoration: none;">⬅ Retour au
                     résumé</a>
                 <h2 class="page-title mt-10">📊 Rapport d'inventaire</h2>
                 <p class="mt-5 mb-0 text-muted font-italic">Clôturé le
                     <?php echo date('d/m/Y à H:i', strtotime($inv['date_fin'])); ?></p>
             </div>
             <div class="no-print flex-center">
-                <a href="inventaire.php?action=export_xls" class="btn btn-success-dark">📥 Export Excel</a>
+                <a href="inventaire?action=export_rapport_xls&id=<?php echo $inv_id; ?>" class="btn btn-success-dark">📥
+                    Export Excel Complet du Rapport</a>
                 <button onclick="window.print()" class="btn" style="background-color: #333; color: white;">🖨️ Imprimer /
                     PDF</button>
             </div>
@@ -351,7 +619,7 @@ if ($action === 'rapport') {
 // ==========================================
 elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
     if (!$peut_editer) {
-        header('Location: inventaire.php');
+        header('Location: inventaire');
         exit;
     }
 
@@ -359,25 +627,35 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
     $stmt_lieu->execute(['id' => $lieu_id]);
     $lieu = $stmt_lieu->fetch();
     if (!$lieu) {
-        header('Location: inventaire.php');
+        header('Location: inventaire');
         exit;
     }
 
     $est_reserve = $lieu['est_reserve'] == 1;
 
-    // --- LOGIQUE MATÉRIEL LOURD ---
-    $est_malle_radio = (stripos($lieu['nom'], 'radio') !== false);
-    $est_sac_dsa = (stripos($lieu['nom'], 'dsa') !== false || stripos($lieu['nom'], 'defibrillateur') !== false || stripos($lieu['nom'], 'défibrillateur') !== false);
-    // ------------------------------
+    $est_malle_radio = estTypeRadio($lieu['nom']);
+    $est_sac_dsa = estTypeDSA($lieu['nom']);
 
-    // On intègre m.check_fonctionnel à la requête
-    $stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.quantite, s.date_peremption, m.id AS materiel_id, m.nom AS materiel_nom, m.check_fonctionnel, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom");
+    $stmt_stocks = $pdo->prepare("
+        SELECT s.id as stock_id, s.quantite, s.date_peremption, s.poche, 
+               m.id AS materiel_id, m.nom AS materiel_nom, m.check_fonctionnel, c.nom AS categorie_nom 
+        FROM stocks s 
+        JOIN materiels m ON s.materiel_id = m.id 
+        JOIN categories c ON m.categorie_id = c.id 
+        WHERE s.lieu_id = :lieu_id 
+        ORDER BY CASE WHEN s.poche = '' OR s.poche IS NULL THEN 1 ELSE 0 END, s.poche ASC, c.nom ASC, m.nom ASC
+    ");
     $stmt_stocks->execute(['lieu_id' => $lieu_id]);
     $stocks = $stmt_stocks->fetchAll();
 
-    $stocks_par_categorie = [];
+    $stocks_par_groupe = [];
     foreach ($stocks as $stock) {
-        $stocks_par_categorie[$stock['categorie_nom']][] = $stock;
+        if (!empty($stock['poche'])) {
+            $nom_groupe = "🎒 Poche : " . $stock['poche'];
+        } else {
+            $nom_groupe = "📦 " . $stock['categorie_nom'];
+        }
+        $stocks_par_groupe[$nom_groupe][] = $stock;
     }
 
     $reserves_par_materiel = [];
@@ -392,7 +670,7 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
     <div class="white-box mb-20" style="position: sticky; top: 0; z-index: 100; border-bottom: 3px solid #d32f2f;">
         <div class="flex-between">
             <div>
-                <a href="inventaire.php" class="text-muted text-md" style="text-decoration: none;">⬅ Annuler et retourner au
+                <a href="inventaire" class="text-muted text-md" style="text-decoration: none;">⬅ Annuler et retourner au
                     menu</a>
                 <h2 class="page-title mt-5">📋 Pointage : <?php echo htmlspecialchars($lieu['nom']); ?>
                     <?php if ($est_reserve)
@@ -412,25 +690,33 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
         </div>
     </div>
 
-    <form id="form-inventaire" method="POST" action="inventaire.php?action=comptage&lieu_id=<?php echo $lieu_id; ?>">
+    <form id="form-inventaire" method="POST" action="inventaire?action=comptage&lieu_id=<?php echo $lieu_id; ?>">
+        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
         <input type="hidden" name="valider_lieu" value="1">
 
         <div class="alert alert-warning mb-25">
             <strong class="text-danger">⚠️ AVERTISSEMENT :</strong> Le bouton de validation restera bloqué tant que <span
-                class="text-danger font-bold">TOUTES</span> les vérifications obligatoires (cases à cocher de sécurité et
-            vérifications fonctionnelles) ne seront pas cochées.
+                class="text-danger font-bold">TOUTES</span> les vérifications obligatoires ne seront pas cochées.
         </div>
 
-        <?php if (empty($stocks_par_categorie)): ?>
+        <?php if (empty($stocks_par_groupe)): ?>
             <p class="text-center text-muted font-italic">Ce lieu est vide.</p>
         <?php else: ?>
-            <?php foreach ($stocks_par_categorie as $categorie => $articles): ?>
+            <?php foreach ($stocks_par_groupe as $nom_groupe => $articles): ?>
                 <div class="category-block mb-30" style="box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
-                    <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
+                    <?php
+                    if (strpos($nom_groupe, 'Poche') !== false) {
+                        $couleur = ['bg' => '#1976D2', 'text' => 'white'];
+                    } else {
+                        $cat_pure = str_replace('📦 ', '', $nom_groupe);
+                        $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($cat_pure) : ['bg' => '#2c3e50', 'text' => 'white'];
+                    }
+                    ?>
                     <h3 class="category-header"
                         style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                        <?php echo htmlspecialchars($categorie); ?>
+                        <?php echo htmlspecialchars($nom_groupe); ?>
                     </h3>
+
                     <div class="table-responsive">
                         <table class="table-manager">
                             <thead>
@@ -447,10 +733,8 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                                     $theo = $art['quantite'];
                                     $mat_id = $art['materiel_id'];
 
-                                    // Détections
-                                    $nom_mat_lower = strtolower($art['materiel_nom']);
-                                    $est_item_radio = ($est_malle_radio && (strpos($nom_mat_lower, 'radio') !== false || strpos($nom_mat_lower, 'talkie') !== false));
-                                    $est_item_dsa = ($est_sac_dsa && (strpos($nom_mat_lower, 'dsa') !== false || strpos($nom_mat_lower, 'defibrillateur') !== false || strpos($nom_mat_lower, 'défibrillateur') !== false));
+                                    $est_item_radio = ($est_malle_radio && estTypeRadio($art['materiel_nom']));
+                                    $est_item_dsa = ($est_sac_dsa && estTypeDSA($art['materiel_nom']));
                                     $est_item_check = ($art['check_fonctionnel'] == 1);
 
                                     $est_item_special = ($est_item_radio || $est_item_dsa || $est_item_check);
@@ -488,7 +772,6 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                                                 <input type="hidden" name="comptage[<?php echo $sid; ?>][counted]"
                                                     id="counted-<?php echo $sid; ?>" class="input-comptage"
                                                     data-attendu="<?php echo $theo; ?>" value="">
-
                                             <?php elseif ($est_item_dsa): ?>
                                                 <div class="text-left mt-10 mb-10"
                                                     style="display: inline-block; text-align: left; user-select: none;">
@@ -502,7 +785,6 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                                                 <input type="hidden" name="comptage[<?php echo $sid; ?>][counted]"
                                                     id="counted-<?php echo $sid; ?>" class="input-comptage"
                                                     data-attendu="<?php echo $theo; ?>" value="">
-
                                             <?php elseif ($est_item_check): ?>
                                                 <div class="text-left mt-10 mb-10"
                                                     style="display: inline-block; text-align: left; user-select: none;">
@@ -516,7 +798,6 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                                                 <input type="hidden" name="comptage[<?php echo $sid; ?>][counted]"
                                                     id="counted-<?php echo $sid; ?>" class="input-comptage"
                                                     data-attendu="<?php echo $theo; ?>" value="">
-
                                             <?php else: ?>
                                                 <input type="number" min="0" name="comptage[<?php echo $sid; ?>][counted]"
                                                     class="input-comptage" data-attendu="<?php echo $theo; ?>"
@@ -590,7 +871,6 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                                             </td>
                                         </tr>
                                     <?php endif; ?>
-
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
@@ -609,29 +889,24 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
             let checks = document.querySelectorAll('.special-check-' + sid);
             let allChecked = true;
             checks.forEach(c => { if (!c.checked) allChecked = false; });
-
             let hiddenInput = document.getElementById('counted-' + sid);
             if (hiddenInput) {
                 hiddenInput.value = allChecked ? theo : 0;
             }
-
             if (typeof checkDifferenceInv === 'function') {
                 checkDifferenceInv(hiddenInput, isReserve);
             }
-
             checkGlobalSpecialState();
         }
 
         function checkGlobalSpecialState() {
             let allCheckboxes = document.querySelectorAll('input[type="checkbox"][class^="special-check-"]');
             let btn = document.getElementById('btn-valider-sac');
-
             if (allCheckboxes.length > 0) {
                 let allValid = true;
                 allCheckboxes.forEach(c => {
                     if (!c.checked) allValid = false;
                 });
-
                 if (btn) {
                     btn.disabled = !allValid;
                     if (allValid) {
@@ -650,12 +925,10 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                 }
             }
         }
-
         document.addEventListener('DOMContentLoaded', function () {
             checkGlobalSpecialState();
         });
     </script>
-
     <?php
 }
 
@@ -719,7 +992,7 @@ elseif ($inventaire_actif) {
                     </div>
                 <?php else: ?>
                     <?php if ($peut_editer): ?>
-                        <a href="inventaire.php?action=comptage&lieu_id=<?php echo $lieu['id']; ?>"
+                        <a href="inventaire?action=comptage&lieu_id=<?php echo $lieu['id']; ?>"
                             onclick="return confirm('Commencer l\'inventaire de ce lieu ?');" class="card-sac">
                             <?php if ($est_reserve)
                                 echo '<div class="badge-reserve-abs">📦 RÉSERVE</div>'; ?>
@@ -743,7 +1016,7 @@ elseif ($inventaire_actif) {
         style="box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: <?php echo $tous_faits ? 'block' : 'none'; ?>;">
         <h3 class="text-success mt-0">🎉 Tous les lieux ont été inventoriés !</h3>
         <?php if ($peut_editer): ?>
-            <a href="inventaire.php?action=cloturer"
+            <a href="inventaire?action=cloturer"
                 onclick="return confirm('Êtes-vous sûr de vouloir clôturer définitivement cet inventaire global ?');"
                 class="btn btn-success-dark btn-lg">🔒 CLÔTURER L'INVENTAIRE GLOBAL</a>
         <?php endif; ?>
@@ -782,7 +1055,7 @@ else {
             <div class="text-sm text-muted">Objets en circulation</div>
         </div>
         <?php if ($dernier_inv): ?>
-            <a href="inventaire.php?action=rapport&id=<?php echo $dernier_inv['id']; ?>"
+            <a href="inventaire?action=rapport&id=<?php echo $dernier_inv['id']; ?>"
                 class="carte-animee white-box flex-1 text-center mb-0"
                 style="text-decoration: none; border-bottom: 4px solid #f1c40f; display: block;">
                 <div class="text-sm text-muted" style="text-transform: uppercase;">Dernier pointage</div>
@@ -798,11 +1071,15 @@ else {
         <?php endif; ?>
     </div>
 
-    <?php if ($peut_editer): ?>
-        <div class="text-center mb-30"><a href="inventaire.php?action=lancer"
+    <div class="text-center mb-30" style="display: flex; justify-content: center; gap: 15px; flex-wrap: wrap;">
+        <?php if ($peut_editer): ?>
+            <a href="inventaire?action=lancer"
                 onclick="return confirm('Êtes-vous sûr de vouloir lancer un nouvel inventaire global ?');"
-                class="btn btn-danger-dark btn-lg carte-animee">FAIRE L'INVENTAIRE</a></div>
-    <?php endif; ?>
+                class="btn btn-danger-dark btn-lg carte-animee">FAIRE L'INVENTAIRE</a>
+        <?php endif; ?>
+        <a href="inventaire?action=export_xls" class="btn btn-success-dark btn-lg carte-animee"
+            style="background-color: #2e7d32; border-color: #1b5e20;">EXPORTER L'ÉTAT ACTUEL DES STOCKS (.xls)</a>
+    </div>
 
     <div class="white-box">
         <h2 class="section-title">Répartition globale des stocks</h2>

@@ -270,6 +270,7 @@ require_once 'includes/header.php';
                                                         title="Modifier">✏️</button>
                                                     <form method="POST" action="materiel.php" class="mb-0"
                                                         onsubmit="return confirm('ATTENTION ! Supprimer ?');">
+                                                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                                         <input type="hidden" name="action" value="delete_materiel">
                                                         <input type="hidden" name="materiel_id" value="<?php echo $mat['id']; ?>">
                                                         <button type="submit" class="btn-icon text-muted" title="Supprimer">🗑️</button>

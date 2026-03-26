@@ -12,6 +12,12 @@ if ($_SESSION['role'] !== 'admin') {
 // 1. TRAITEMENT DES FORMULAIRES (POST-REDIRECT-GET)
 // =========================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // --- VÉRIFICATION DU JETON CSRF ---
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
+        die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité (Jeton CSRF invalide ou expiré). Veuillez recharger la page.</div>");
+    }
+    // ----------------------------------
+
     $action = $_POST['action'] ?? '';
 
     // --- AJOUT D'UN UTILISATEUR "HORS CAS" ---
@@ -97,7 +103,8 @@ require_once 'includes/header.php';
     <div class="form-container mb-30">
         <h3 class="section-title">➕ Créer un compte local (Hors CAS)</h3>
 
-        <form method="POST" action="utilisateurs.php" class="flex-row align-center">
+        <form method="POST" action="" class="flex-row align-center">
+            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
             <input type="hidden" name="action" value="ajouter_utilisateur">
 
             <div class="flex-1 min-w-200">
@@ -150,7 +157,8 @@ require_once 'includes/header.php';
                     ?>
                     <tr>
                         <td class="font-bold text-dark">
-                            <form id="<?php echo $form_id; ?>" method="POST" action="utilisateurs.php" class="mb-0">
+                            <form id="<?php echo $form_id; ?>" method="POST" action="" class="mb-0">
+                                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                 <input type="hidden" name="action" value="modifier_droits">
                                 <input type="hidden" name="user_id" value="<?php echo $u['id']; ?>">
                             </form>
@@ -189,8 +197,9 @@ require_once 'includes/header.php';
                                 <?php endif; ?>
 
                                 <?php if (!$est_moi): ?>
-                                    <form method="POST" action="utilisateurs.php"
+                                    <form method="POST" action=""
                                         onsubmit="return confirm('Supprimer définitivement ce compte ?');" class="mb-0 ml-10">
+                                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                         <input type="hidden" name="action" value="supprimer_utilisateur">
                                         <input type="hidden" name="user_id" value="<?php echo $u['id']; ?>">
                                         <button type="submit" class="btn btn-sm btn-danger">🗑️</button>

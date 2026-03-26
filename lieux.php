@@ -18,6 +18,12 @@ if (empty($liste_icones))
     $liste_icones = ['🎒', '🧳', '🚑', '🏥', '🏢', '💊', '🧊', '📦'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // --- VÉRIFICATION DU JETON CSRF ---
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
+        die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité (Jeton CSRF invalide ou expiré). Veuillez recharger la page.</div>");
+    }
+    // ----------------------------------
+
     if (!$peut_editer) {
         $_SESSION['flash_error'] = "🛑 Action bloquée.";
         header("Location: lieux.php");
@@ -28,18 +34,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'supprimer_lieu') {
         if (trim($_POST['confirmation_text']) === 'CONFIRMER') {
             $id_del = (int) $_POST['lieu_id'];
-            
+
             // Récupération du nom pour l'historique
             $nom_lieu = $pdo->query("SELECT nom FROM lieux_stockage WHERE id = $id_del")->fetchColumn();
-            
+
             $pdo->prepare("DELETE FROM lieux_stockage WHERE id = :id")->execute(['id' => $id_del]);
-            
-            logAction($pdo, "A supprimé le lieu de stockage : " . ($nom_lieu ?: "ID $id_del")); // NOUVEAU
+
+            logAction($pdo, "A supprimé le lieu de stockage : " . ($nom_lieu ?: "ID $id_del"));
             $_SESSION['flash_success'] = "🗑️ Le stockage a été définitivement supprimé.";
         } else {
             $_SESSION['flash_error'] = "⚠️ Confirmation invalide.";
         }
-        header("Location: lieux.php");
+        header("Location: lieux"); // Redirection vers l'URL propre
         exit;
     }
 
@@ -48,11 +54,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($nom) && !empty($_POST['type'])) {
             $pdo->prepare("INSERT INTO lieux_stockage (nom, type, icone, est_reserve) VALUES (?, ?, ?, ?)")
                 ->execute([$nom, $_POST['type'], $_POST['icone'], isset($_POST['est_reserve']) ? 1 : 0]);
-            
-            logAction($pdo, "A créé le lieu de stockage : $nom"); // NOUVEAU
+
+            logAction($pdo, "A créé le lieu de stockage : $nom");
             $_SESSION['flash_success'] = "✅ Le nouveau stockage a été créé !";
         }
-        header("Location: lieux.php");
+        header("Location: lieux"); // Redirection vers l'URL propre
         exit;
     }
 
@@ -62,11 +68,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($id > 0 && !empty($nom)) {
             $pdo->prepare("UPDATE lieux_stockage SET nom = ?, type = ?, icone = ?, est_reserve = ? WHERE id = ?")
                 ->execute([$nom, $_POST['type'], $_POST['icone'], isset($_POST['est_reserve']) ? 1 : 0, $id]);
-            
-            logAction($pdo, "A modifié les paramètres du lieu : $nom"); // NOUVEAU
+
+            logAction($pdo, "A modifié les paramètres du lieu : $nom");
             $_SESSION['flash_success'] = "✅ Paramètres mis à jour !";
         }
-        header("Location: lieux.php?id=" . $id);
+        header("Location: lieux?id=" . $id); // Redirection vers l'URL propre
         exit;
     }
 }
@@ -99,7 +105,7 @@ if ($lieu_id > 0) {
     <div class="white-box">
         <div class="flex-between-start border-bottom pb-15 mb-20">
             <div>
-                <a href="lieux.php" class="text-muted text-md" style="text-decoration: none;">⬅ Retour aux stockages</a>
+                <a href="lieux" class="text-muted text-md" style="text-decoration: none;">⬅ Retour aux stockages</a>
                 <h2 class="page-title mt-10">
                     <?php echo htmlspecialchars($icone_affichage); ?> Contenu :
                     <?php echo htmlspecialchars($lieu['nom']); ?>
@@ -116,7 +122,7 @@ if ($lieu_id > 0) {
                         onclick="document.getElementById('zone-suppression').style.display = 'block'; document.getElementById('zone-edition-lieu').style.display = 'none';"
                         class="btn btn-outline-danger">🗑️ Supprimer</button>
                 <?php endif; ?>
-                <a href="gestion_sac.php?lieu_id=<?php echo $lieu_id; ?>" class="btn btn-danger-dark">
+                <a href="gestion_sac?lieu_id=<?php echo $lieu_id; ?>" class="btn btn-danger-dark">
                     <?php echo $peut_editer ? '✏️ Éditer / Remplir' : '👁️ Consulter le sac'; ?>
                 </a>
             </div>
@@ -125,7 +131,8 @@ if ($lieu_id > 0) {
         <?php if ($peut_editer): ?>
             <div id="zone-edition-lieu" class="form-box-edit" style="display: none;">
                 <h3 class="mt-0 text-primary">⚙️ Modifier les informations de ce stockage</h3>
-                <form action="lieux.php?id=<?php echo $lieu_id; ?>" method="POST" class="flex-row align-center">
+                <form action="lieux?id=<?php echo $lieu_id; ?>" method="POST" class="flex-row align-center">
+                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                     <input type="hidden" name="action" value="modifier_lieu">
                     <input type="hidden" name="lieu_id" value="<?php echo $lieu_id; ?>">
 
@@ -175,9 +182,11 @@ if ($lieu_id > 0) {
                 <h3 class="text-warning mt-0">⚠️ Action irréversible</h3>
                 <p class="font-normal text-dark">Saisissez <strong>CONFIRMER</strong> ci-dessous pour supprimer ce stockage :
                 </p>
-                <form action="lieux.php" method="POST" class="flex-center">
+                <form action="lieux" method="POST" class="flex-center">
+                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                     <input type="hidden" name="action" value="supprimer_lieu">
                     <input type="hidden" name="lieu_id" value="<?php echo $lieu_id; ?>">
+
                     <input type="text" name="confirmation_text" required placeholder="Tapez ici..."
                         class="input-field flex-1 mb-0">
                     <button type="submit" class="btn btn-danger-dark">Valider</button>
@@ -213,30 +222,31 @@ if ($lieu_id > 0) {
                         style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
                         <?php echo htmlspecialchars($categorie); ?>
                     </h3>
-                <div class="table-responsive">
-                    <table class="table-manager">
-                        <thead>
-                            <tr>
-                                <th style="width: 50%;">NOM DU MATÉRIEL</th>
-                                <th class="text-center" style="width: 25%;">PÉREMPTION</th>
-                                <th class="text-center" style="width: 25%;">QUANTITÉ</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($articles as $article):
-                                $raw_date = $article['date_peremption'];
-                                $affichage_date = $raw_date ? date('d/m/Y', strtotime($raw_date)) : '-';
-                                ?>
-                                <tr class="item-row" data-nom="<?php echo htmlspecialchars(strtolower($article['materiel_nom'])); ?>"
-                                    data-peremp="<?php echo $raw_date; ?>">
-                                    <td class="font-bold text-dark"><?php echo htmlspecialchars($article['materiel_nom']); ?></td>
-                                    <td class="text-center text-muted"><?php echo $affichage_date; ?></td>
-                                    <td class="text-center font-bold text-lg"><?php echo $article['quantite']; ?></td>
+                    <div class="table-responsive">
+                        <table class="table-manager">
+                            <thead>
+                                <tr>
+                                    <th style="width: 50%;">NOM DU MATÉRIEL</th>
+                                    <th class="text-center" style="width: 25%;">PÉREMPTION</th>
+                                    <th class="text-center" style="width: 25%;">QUANTITÉ</th>
                                 </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($articles as $article):
+                                    $raw_date = $article['date_peremption'];
+                                    $affichage_date = $raw_date ? date('d/m/Y', strtotime($raw_date)) : '-';
+                                    ?>
+                                    <tr class="item-row"
+                                        data-nom="<?php echo htmlspecialchars(strtolower($article['materiel_nom'])); ?>"
+                                        data-peremp="<?php echo $raw_date; ?>">
+                                        <td class="font-bold text-dark"><?php echo htmlspecialchars($article['materiel_nom']); ?></td>
+                                        <td class="text-center text-muted"><?php echo $affichage_date; ?></td>
+                                        <td class="text-center font-bold text-lg"><?php echo $article['quantite']; ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>
@@ -262,7 +272,8 @@ else {
     <?php if ($peut_editer): ?>
         <div id="form-nouveau-lieu" class="form-box-edit" style="display: none;">
             <h3 class="mt-0">Créer un nouveau stockage</h3>
-            <form action="lieux.php" method="POST" class="flex-row align-center">
+            <form action="lieux" method="POST" class="flex-row align-center">
+                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                 <input type="hidden" name="action" value="creer_lieu">
 
                 <div class="flex-1 min-w-150">
@@ -315,7 +326,7 @@ else {
                 $type_affichage = 'Réserve';
             $icone = !empty($lieu['icone']) ? $lieu['icone'] : '🎒';
             ?>
-            <a href="lieux.php?id=<?php echo $lieu['id']; ?>"
+            <a href="lieux?id=<?php echo $lieu['id']; ?>"
                 class="card-sac <?php echo ($lieu['est_reserve'] == 1) ? 'border-blue' : ''; ?>">
                 <?php if ($lieu['est_reserve'] == 1): ?>
                     <div class="badge-reserve-abs">📦 RÉSERVE</div>
