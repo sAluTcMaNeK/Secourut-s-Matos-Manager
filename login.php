@@ -1,8 +1,15 @@
 <?php
 // login.php
 session_start();
+
 require_once 'vendor/autoload.php';
 require_once 'config/db.php';
+
+// --- GÉNÉRATION DU JETON CSRF ---
+// Nécessaire car auth.php n'est pas chargé sur cette page
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
 
 // Si déjà connecté, on redirige vers l'accueil
 if (isset($_SESSION['user_id'])) {
@@ -13,12 +20,11 @@ if (isset($_SESSION['user_id'])) {
 $error = '';
 $success = '';
 
-// --- NOUVEAU : Récupération du message de déconnexion ---
+// Récupération du message de déconnexion
 if (isset($_SESSION['flash_success'])) {
     $success = $_SESSION['flash_success'];
-    unset($_SESSION['flash_success']); // On le supprime pour qu'il ne s'affiche qu'une seule fois
+    unset($_SESSION['flash_success']);
 }
-// --------------------------------------------------------
 
 // =========================================================
 // 1. TRAITEMENT DU FORMULAIRE CLASSIQUE (Comptes Locaux/Admin)
@@ -29,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité (Jeton CSRF invalide ou expiré). Veuillez recharger la page.</div>");
     }
     // ----------------------------------
+
     $username = trim($_POST['username']);
     $password = $_POST['password'];
 
@@ -40,19 +47,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($user && $user['mot_de_passe'] !== 'OAUTH_UTC') {
             if (password_verify($password, $user['mot_de_passe'])) {
 
-                if ($user['can_view'] == 1 || $user['role'] === 'admin') {
-                    $_SESSION['user_id'] = $user['id'];
-                    $_SESSION['username'] = $user['nom_utilisateur'];
-                    $_SESSION['role'] = $user['role'];
-                    $_SESSION['can_view'] = ($user['role'] === 'admin') ? 1 : (int) $user['can_view'];
-                    $_SESSION['can_edit'] = ($user['role'] === 'admin') ? 1 : (int) $user['can_edit'];
-                    $_SESSION['last_activity'] = time();
+                // On connecte l'utilisateur (le rôle sera affiné par auth.php sur les autres pages)
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['username'] = $user['nom_utilisateur'];
+                $_SESSION['role'] = $user['role'];
+                $_SESSION['last_activity'] = time();
 
-                    header("Location: index.php");
-                    exit;
-                } else {
-                    $error = "Votre compte a été désactivé.";
-                }
+                header("Location: index.php");
+                exit;
             } else {
                 $error = "Identifiant ou mot de passe incorrect.";
             }
@@ -145,30 +147,19 @@ elseif (isset($_GET['code'])) {
                 $user_local = $stmt->fetch();
 
                 if (!$user_local) {
-                    $stmt_insert = $pdo->prepare("INSERT INTO utilisateurs (nom_utilisateur, mot_de_passe, role, can_view, can_edit) VALUES (?, 'OAUTH_UTC', 'user', 1, 0)");
+                    // NOUVEAU : On insère directement le rôle 'consultation'
+                    $stmt_insert = $pdo->prepare("INSERT INTO utilisateurs (nom_utilisateur, mot_de_passe, role) VALUES (?, 'OAUTH_UTC', 'consultation')");
                     $stmt_insert->execute([$nom_complet]);
                     $user_id = $pdo->lastInsertId();
-
-                    $role = 'user';
-                    $can_view = 1;
-                    $can_edit = 0;
+                    $role = 'consultation';
                 } else {
                     $user_id = $user_local['id'];
                     $role = $user_local['role'];
-                    $can_view = $user_local['can_view'];
-                    $can_edit = $user_local['can_edit'];
-
-                    if ($can_view == 0) {
-                        $pdo->prepare("UPDATE utilisateurs SET can_view = 1 WHERE id = ?")->execute([$user_id]);
-                        $can_view = 1;
-                    }
                 }
 
                 $_SESSION['user_id'] = $user_id;
                 $_SESSION['username'] = $nom_complet;
                 $_SESSION['role'] = $role;
-                $_SESSION['can_view'] = (int) $can_view;
-                $_SESSION['can_edit'] = (int) $can_edit;
                 $_SESSION['last_activity'] = time();
 
                 header("Location: index.php");
@@ -216,6 +207,8 @@ elseif (isset($_GET['code'])) {
         <div class="separator">Ou connexion locale</div>
 
         <form method="POST" action="login.php" style="text-align: left;">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
+
             <label
                 style="font-weight: bold; color: #333; display: block; margin-bottom: 5px; font-size: 13px;">Identifiant
                 local</label>

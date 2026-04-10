@@ -4,7 +4,7 @@ require_once 'includes/auth.php';
 require_once 'config/db.php';
 
 // Sécurité : Réservé aux administrateurs
-if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+if (!$est_admin) {
     $_SESSION['flash_error'] = "🛑 Accès refusé. Réservé aux administrateurs.";
     header("Location: index.php");
     exit;

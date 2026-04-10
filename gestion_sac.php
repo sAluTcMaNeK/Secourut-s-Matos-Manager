@@ -3,17 +3,32 @@
 require_once 'includes/auth.php';
 require_once 'config/db.php';
 require_once 'includes/functions.php';
+
+// Création des colonnes si elles n'existent pas
 try {
     $pdo->exec("ALTER TABLE stocks ADD COLUMN poche VARCHAR(100) DEFAULT ''");
 } catch (PDOException $e) {
 }
 
+try {
+    $pdo->exec("ALTER TABLE stocks ADD COLUMN note VARCHAR(255) DEFAULT ''");
+} catch (PDOException $e) {
+}
+
 $lieu_id = isset($_GET['lieu_id']) ? (int) $_GET['lieu_id'] : 0;
-$peut_editer = ($_SESSION['can_edit'] === 1 || (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'));
+// NOUVEAU: On applique les droits Matos
+$peut_editer = $peut_editer_matos;
+
+// SÉCURITÉ : Si l'utilisateur n'a pas les droits, on le renvoie directement sur la page de consultation
+if (!$peut_editer) {
+    $_SESSION['flash_error'] = "🛑 Accès refusé : Vous n'avez pas les droits pour modifier le contenu des sacs.";
+    header("Location: lieux.php?id=" . $lieu_id);
+    exit;
+}
+
 // --- VÉRIFICATION DU VERROUILLAGE (SCELLÉ) ---
 $dps_scelle = false;
 if ($lieu_id > 0) {
-    // On cherche si ce sac est validé sur un événement futur ou du jour
     $stmt_scelle = $pdo->prepare("
         SELECT e.nom, e.date_evenement 
         FROM evenements_lieux el 
@@ -36,11 +51,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité (Jeton CSRF invalide ou expiré). Veuillez recharger la page.</div>");
     }
     // ----------------------------------
-    if (!$peut_editer) {
-        $_SESSION['flash_error'] = "🛑 Action bloquée : Vous n'avez pas les droits de modification.";
-        header("Location: gestion_sac.php?lieu_id=" . $lieu_id);
-        exit;
-    }
 
     $action = $_POST['action'] ?? '';
     $stmt_lieu_info = $pdo->prepare("SELECT nom, est_reserve FROM lieux_stockage WHERE id = ?");
@@ -55,7 +65,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $qty = (int) $_POST['quantite'];
             $date_p = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
             $reserve_stock_id = $_POST['reserve_stock_id'] ?? '';
-            $poche = trim($_POST['poche'] ?? ''); // NOUVEAU: Récupère la poche
+            $poche = trim($_POST['poche'] ?? '');
+            $note = trim($_POST['note'] ?? ''); // NOUVEAU: Récupère la note
 
             $stmt_current = $pdo->prepare("SELECT s.quantite, s.materiel_id, m.nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id WHERE s.id = ?");
             $stmt_current->execute([$stock_id]);
@@ -97,8 +108,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                // NOUVEAU: On met à jour la quantité ET LA POCHE
-                $pdo->prepare("UPDATE stocks SET quantite = :qty, date_peremption = :dp, poche = :poche WHERE id = :id")->execute(['qty' => $qty, 'dp' => $date_p, 'poche' => $poche, 'id' => $stock_id]);
+                // NOUVEAU: On met à jour la quantité, la poche ET LA NOTE
+                $pdo->prepare("UPDATE stocks SET quantite = :qty, date_peremption = :dp, poche = :poche, note = :note WHERE id = :id")->execute(['qty' => $qty, 'dp' => $date_p, 'poche' => $poche, 'note' => $note, 'id' => $stock_id]);
 
                 if ($qty < $old_qty) {
                     $diff = $old_qty - $qty;
@@ -131,7 +142,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $quantite = (int) $_POST['quantite'];
             $reserve_stock_id = $_POST['reserve_stock_id'] ?? 'manual';
             $date_peremption = !empty($_POST['date_peremption']) ? $_POST['date_peremption'] : null;
-            $poche = trim($_POST['poche'] ?? ''); // NOUVEAU: Récupère la poche
+            $poche = trim($_POST['poche'] ?? '');
+            $note = trim($_POST['note'] ?? ''); // NOUVEAU: Récupère la note
 
             if ($materiel_id && $quantite > 0) {
                 $added_date = $date_peremption;
@@ -160,9 +172,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stock_existant = $stmt_check->fetch();
 
                 if ($stock_existant) {
-                    $pdo->prepare("UPDATE stocks SET quantite = :qty WHERE id = :id")->execute(['qty' => $stock_existant['quantite'] + $quantite, 'id' => $stock_existant['id']]);
+                    $pdo->prepare("UPDATE stocks SET quantite = :qty, note = :note WHERE id = :id")->execute(['qty' => $stock_existant['quantite'] + $quantite, 'note' => $note, 'id' => $stock_existant['id']]);
                 } else {
-                    $pdo->prepare("INSERT INTO stocks (materiel_id, lieu_id, quantite, date_peremption, poche) VALUES (:mat, :lieu, :qty, :peremp, :poche)")->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'qty' => $quantite, 'peremp' => $added_date, 'poche' => $poche]);
+                    $pdo->prepare("INSERT INTO stocks (materiel_id, lieu_id, quantite, date_peremption, poche, note) VALUES (:mat, :lieu, :qty, :peremp, :poche, :note)")->execute(['mat' => $materiel_id, 'lieu' => $lieu_id, 'qty' => $quantite, 'peremp' => $added_date, 'poche' => $poche, 'note' => $note]);
                 }
 
                 $nom_mat = $pdo->query("SELECT nom FROM materiels WHERE id = $materiel_id")->fetchColumn() ?: "Objet";
@@ -195,23 +207,11 @@ if (!$lieu) {
 }
 $est_reserve = $lieu['est_reserve'] == 1;
 
-$est_malle_radio = estTypeRadio($lieu['nom']);
-
 $stmt_mat = $pdo->query("SELECT m.id, m.nom, c.nom AS categorie_nom FROM materiels m JOIN categories c ON m.categorie_id = c.id ORDER BY c.nom, m.nom");
-$tous_materiels = $stmt_mat->fetchAll();
+$materiels = $stmt_mat->fetchAll();
 
-$materiels = [];
-foreach ($tous_materiels as $mat) {
-    $cat_est_radio = estTypeRadio($mat['categorie_nom']);
-    if ($est_malle_radio && $cat_est_radio) {
-        $materiels[] = $mat;
-    } elseif (!$est_malle_radio && !$cat_est_radio) {
-        $materiels[] = $mat;
-    }
-}
-
-// NOUVEAU: Récupération de s.poche
-$stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.materiel_id, s.quantite, s.date_peremption, s.poche, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom, s.date_peremption");
+// NOUVEAU: Récupération de s.poche et s.note
+$stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.materiel_id, s.quantite, s.date_peremption, s.poche, s.note, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom, s.date_peremption");
 $stmt_stocks->execute(['lieu_id' => $lieu_id]);
 $stocks = $stmt_stocks->fetchAll();
 
@@ -294,6 +294,11 @@ require_once 'includes/header.php';
                         }
                         ?>
                     </datalist>
+                </div>
+
+                <div class="flex-2 min-w-150">
+                    <label class="font-bold text-md mb-5 display-block" style="color: #e65100;">📝 Note / Min.</label>
+                    <input type="text" name="note" placeholder="Ex: Min. 2 dans le sac..." class="input-field mb-0">
                 </div>
 
                 <?php if (!$est_reserve): ?>
@@ -393,11 +398,23 @@ require_once 'includes/header.php';
                                         </div>
                                     <?php endif; ?>
 
+                                    <?php if (!empty($article['note'])): ?>
+                                        <div class="view-mode-<?php echo $sid; ?> text-sm mt-5" style="color: #e65100;">
+                                            📝 <?php echo htmlspecialchars($article['note']); ?>
+                                        </div>
+                                    <?php endif; ?>
+
                                     <?php if ($peut_editer): ?>
                                         <input class="edit-mode-<?php echo $sid; ?> input-field mt-5" type="text"
                                             form="form-edit-<?php echo $sid; ?>" name="poche"
-                                            value="<?php echo htmlspecialchars($article['poche']); ?>"
+                                            value="<?php echo htmlspecialchars($article['poche'] ?? ''); ?>"
                                             placeholder="Rangé dans la poche..." list="liste-poches"
+                                            style="display:none; padding: 5px; width: 90%; font-size: 12px;">
+
+                                        <input class="edit-mode-<?php echo $sid; ?> input-field mt-5" type="text"
+                                            form="form-edit-<?php echo $sid; ?>" name="note"
+                                            value="<?php echo htmlspecialchars($article['note'] ?? ''); ?>"
+                                            placeholder="Note ou qté min..."
                                             style="display:none; padding: 5px; width: 90%; font-size: 12px;">
                                     <?php endif; ?>
                                 </td>

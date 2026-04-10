@@ -3,8 +3,9 @@
 require_once 'includes/auth.php';
 require_once 'config/db.php';
 
-if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
-    $_SESSION['flash_error'] = "🛑 Accès refusé.";
+// NOUVEAU : Accès autorisé à l'équipe Matos et aux Administrateurs
+if (!$peut_editer_matos) {
+    $_SESSION['flash_error'] = "🛑 Accès refusé. Réservé à l'équipe Matos et aux Administrateurs.";
     header("Location: index.php");
     exit;
 }
@@ -21,8 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $nom = trim($_POST['nom']);
             if (!empty($nom)) {
                 $pdo->prepare("INSERT INTO categories (nom, couleur_fond, couleur_texte) VALUES (?, ?, ?)")->execute([$nom, $_POST['couleur_fond'], $_POST['couleur_texte']]);
-
-                logAction($pdo, "A ajouté la catégorie : $nom"); // NOUVEAU
+                logAction($pdo, "A ajouté la catégorie : $nom");
                 $_SESSION['flash_success'] = "✅ Catégorie '$nom' ajoutée.";
             }
         } elseif ($action === 'edit_cat') {
@@ -30,8 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $nom = trim($_POST['nom']);
             if (!empty($nom) && $id > 0) {
                 $pdo->prepare("UPDATE categories SET nom = ?, couleur_fond = ?, couleur_texte = ? WHERE id = ?")->execute([$nom, $_POST['couleur_fond'], $_POST['couleur_texte'], $id]);
-
-                logAction($pdo, "A modifié la catégorie : $nom"); // NOUVEAU
+                logAction($pdo, "A modifié la catégorie : $nom");
                 $_SESSION['flash_success'] = "✏️ Catégorie mise à jour.";
             }
         } elseif ($action === 'delete_cat') {
@@ -42,16 +41,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['flash_error'] = "❌ Impossible : Catégorie non vide.";
             } else {
                 $pdo->prepare("DELETE FROM categories WHERE id = ?")->execute([$id]);
-
-                logAction($pdo, "A supprimé la catégorie : " . ($nom_cat ?: "ID $id")); // NOUVEAU
+                logAction($pdo, "A supprimé la catégorie : " . ($nom_cat ?: "ID $id"));
                 $_SESSION['flash_success'] = "🗑️ Catégorie supprimée.";
             }
         } elseif ($action === 'add_type') {
             $nom = trim($_POST['nom']);
             if (!empty($nom)) {
                 $pdo->prepare("INSERT INTO types_lieux (nom) VALUES (?)")->execute([$nom]);
-
-                logAction($pdo, "A ajouté le type de stockage : $nom"); // NOUVEAU
+                logAction($pdo, "A ajouté le type de stockage : $nom");
                 $_SESSION['flash_success'] = "✅ Nouveau type ajouté.";
             }
         } elseif ($action === 'edit_type') {
@@ -59,33 +56,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $nom = trim($_POST['nom']);
             if (!empty($nom) && $id > 0) {
                 $pdo->prepare("UPDATE types_lieux SET nom = ? WHERE id = ?")->execute([$nom, $id]);
-
-                logAction($pdo, "A modifié le type de stockage : $nom"); // NOUVEAU
+                logAction($pdo, "A modifié le type de stockage : $nom");
                 $_SESSION['flash_success'] = "✏️ Type de stockage mis à jour.";
             }
         } elseif ($action === 'delete_type') {
             $id = (int) $_POST['id'];
             $nom_type = $pdo->query("SELECT nom FROM types_lieux WHERE id = $id")->fetchColumn();
-
             $pdo->prepare("DELETE FROM types_lieux WHERE id = ?")->execute([$id]);
-
-            logAction($pdo, "A supprimé le type de stockage : " . ($nom_type ?: "ID $id")); // NOUVEAU
+            logAction($pdo, "A supprimé le type de stockage : " . ($nom_type ?: "ID $id"));
             $_SESSION['flash_success'] = "🗑️ Type supprimé.";
 
         } elseif ($action === 'add_icone') {
             if (!empty($_POST['icone'])) {
                 $pdo->prepare("INSERT INTO icones_lieux (icone) VALUES (?)")->execute([trim($_POST['icone'])]);
-
-                logAction($pdo, "A ajouté l'icône : " . trim($_POST['icone'])); // NOUVEAU
+                logAction($pdo, "A ajouté l'icône : " . trim($_POST['icone']));
                 $_SESSION['flash_success'] = "✅ Icône ajoutée.";
             }
         } elseif ($action === 'delete_icone') {
             $id = (int) $_POST['id'];
             $icone = $pdo->query("SELECT icone FROM icones_lieux WHERE id = $id")->fetchColumn();
-
             $pdo->prepare("DELETE FROM icones_lieux WHERE id = ?")->execute([$id]);
-
-            logAction($pdo, "A supprimé l'icône : " . ($icone ?: "ID $id")); // NOUVEAU
+            logAction($pdo, "A supprimé l'icône : " . ($icone ?: "ID $id"));
             $_SESSION['flash_success'] = "🗑️ Icône supprimée.";
         }
     } catch (PDOException $e) {
@@ -103,14 +94,12 @@ require_once 'includes/header.php';
 
 <div class="flex-between mb-20">
     <h2 class="page-title text-dark mb-0">⚙️ Paramètres Généraux</h2>
-    <span class="badge badge-pill btn-danger-dark">Espace Administrateur</span>
+    <span class="badge badge-pill btn-primary">Espace Matériel & Admin</span>
 </div>
 
 <div class="flex-row">
-
     <div class="white-box flex-1 min-w-350">
         <h3 class="section-title">🏷️ Catégories de Matériel</h3>
-
         <form method="POST" action="parametres.php" class="flex-center form-box mb-20">
             <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
             <input type="hidden" name="action" value="add_cat">
@@ -161,7 +150,6 @@ require_once 'includes/header.php';
 <div class="flex-1 min-w-350" style="display: flex; flex-direction: column; gap: 20px;">
     <div class="white-box mb-0">
         <h3 class="section-title">📋 Types de Stockage</h3>
-
         <form method="POST" action="parametres.php" class="flex-row-sm align-center mb-15">
             <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
             <input type="hidden" name="action" value="add_type">
@@ -169,7 +157,6 @@ require_once 'includes/header.php';
                 class="input-field flex-1 min-w-150 mb-0">
             <button type="submit" class="btn btn-success-dark">Ajouter</button>
         </form>
-
         <table class="table-manager" style="width: 100%;">
             <tbody>
                 <?php foreach ($types_lieux as $type): ?>

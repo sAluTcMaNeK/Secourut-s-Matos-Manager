@@ -3,6 +3,21 @@
 require_once 'includes/auth.php';
 require_once 'config/db.php';
 
+// NOUVEAU : Application du rôle métier
+$peut_editer = $peut_editer_matos;
+
+// --- MISE À JOUR AUTOMATIQUE DE LA BASE DE DONNÉES ---
+try {
+    $pdo->exec("ALTER TABLE stocks ADD COLUMN poche VARCHAR(100) DEFAULT ''");
+} catch (PDOException $e) {
+}
+
+try {
+    $pdo->exec("ALTER TABLE stocks ADD COLUMN note VARCHAR(255) DEFAULT ''");
+} catch (PDOException $e) {
+}
+// -----------------------------------------------------
+
 // RECUPERATION DYNAMIQUE DES PARAMETRES
 $liste_types = [];
 $liste_icones = [];
@@ -34,18 +49,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'supprimer_lieu') {
         if (trim($_POST['confirmation_text']) === 'CONFIRMER') {
             $id_del = (int) $_POST['lieu_id'];
-
-            // Récupération du nom pour l'historique
             $nom_lieu = $pdo->query("SELECT nom FROM lieux_stockage WHERE id = $id_del")->fetchColumn();
-
             $pdo->prepare("DELETE FROM lieux_stockage WHERE id = :id")->execute(['id' => $id_del]);
-
-            logAction($pdo, "A supprimé le lieu de stockage : " . ($nom_lieu ?: "ID $id_del"));
+            if (function_exists('logAction'))
+                logAction($pdo, "A supprimé le lieu de stockage : " . ($nom_lieu ?: "ID $id_del"));
             $_SESSION['flash_success'] = "🗑️ Le stockage a été définitivement supprimé.";
         } else {
             $_SESSION['flash_error'] = "⚠️ Confirmation invalide.";
         }
-        header("Location: lieux"); // Redirection vers l'URL propre
+        header("Location: lieux.php");
         exit;
     }
 
@@ -54,11 +66,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($nom) && !empty($_POST['type'])) {
             $pdo->prepare("INSERT INTO lieux_stockage (nom, type, icone, est_reserve) VALUES (?, ?, ?, ?)")
                 ->execute([$nom, $_POST['type'], $_POST['icone'], isset($_POST['est_reserve']) ? 1 : 0]);
-
-            logAction($pdo, "A créé le lieu de stockage : $nom");
+            if (function_exists('logAction'))
+                logAction($pdo, "A créé le lieu de stockage : $nom");
             $_SESSION['flash_success'] = "✅ Le nouveau stockage a été créé !";
         }
-        header("Location: lieux"); // Redirection vers l'URL propre
+        header("Location: lieux.php");
         exit;
     }
 
@@ -68,11 +80,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($id > 0 && !empty($nom)) {
             $pdo->prepare("UPDATE lieux_stockage SET nom = ?, type = ?, icone = ?, est_reserve = ? WHERE id = ?")
                 ->execute([$nom, $_POST['type'], $_POST['icone'], isset($_POST['est_reserve']) ? 1 : 0, $id]);
-
-            logAction($pdo, "A modifié les paramètres du lieu : $nom");
+            if (function_exists('logAction'))
+                logAction($pdo, "A modifié les paramètres du lieu : $nom");
             $_SESSION['flash_success'] = "✅ Paramètres mis à jour !";
         }
-        header("Location: lieux?id=" . $id); // Redirection vers l'URL propre
+        header("Location: lieux.php?id=" . $id);
         exit;
     }
 }
@@ -91,7 +103,7 @@ if ($lieu_id > 0) {
     if (!$lieu)
         die("<div class='alert alert-danger'>Lieu introuvable.</div>");
 
-    $stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.quantite, s.date_peremption, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom, s.date_peremption");
+    $stmt_stocks = $pdo->prepare("SELECT s.id as stock_id, s.quantite, s.date_peremption, s.poche, s.note, m.nom AS materiel_nom, c.nom AS categorie_nom FROM stocks s JOIN materiels m ON s.materiel_id = m.id JOIN categories c ON m.categorie_id = c.id WHERE s.lieu_id = :lieu_id ORDER BY c.nom, m.nom, s.date_peremption");
     $stmt_stocks->execute(['lieu_id' => $lieu_id]);
     $stocks = $stmt_stocks->fetchAll();
 
@@ -105,7 +117,7 @@ if ($lieu_id > 0) {
     <div class="white-box">
         <div class="flex-between-start border-bottom pb-15 mb-20">
             <div>
-                <a href="lieux" class="text-muted text-md" style="text-decoration: none;">⬅ Retour aux stockages</a>
+                <a href="lieux.php" class="text-muted text-md" style="text-decoration: none;">⬅ Retour aux stockages</a>
                 <h2 class="page-title mt-10">
                     <?php echo htmlspecialchars($icone_affichage); ?> Contenu :
                     <?php echo htmlspecialchars($lieu['nom']); ?>
@@ -113,6 +125,7 @@ if ($lieu_id > 0) {
                             RÉSERVE</span><?php endif; ?>
                 </h2>
             </div>
+
             <div class="flex-center">
                 <?php if ($peut_editer): ?>
                     <button
@@ -121,17 +134,16 @@ if ($lieu_id > 0) {
                     <button
                         onclick="document.getElementById('zone-suppression').style.display = 'block'; document.getElementById('zone-edition-lieu').style.display = 'none';"
                         class="btn btn-outline-danger">🗑️ Supprimer</button>
+                    <a href="gestion_sac.php?lieu_id=<?php echo $lieu_id; ?>" class="btn btn-danger-dark">✏️ Éditer /
+                        Remplir</a>
                 <?php endif; ?>
-                <a href="gestion_sac?lieu_id=<?php echo $lieu_id; ?>" class="btn btn-danger-dark">
-                    <?php echo $peut_editer ? '✏️ Éditer / Remplir' : '👁️ Consulter le sac'; ?>
-                </a>
             </div>
         </div>
 
         <?php if ($peut_editer): ?>
             <div id="zone-edition-lieu" class="form-box-edit" style="display: none;">
                 <h3 class="mt-0 text-primary">⚙️ Modifier les informations de ce stockage</h3>
-                <form action="lieux?id=<?php echo $lieu_id; ?>" method="POST" class="flex-row align-center">
+                <form action="lieux.php?id=<?php echo $lieu_id; ?>" method="POST" class="flex-row align-center">
                     <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                     <input type="hidden" name="action" value="modifier_lieu">
                     <input type="hidden" name="lieu_id" value="<?php echo $lieu_id; ?>">
@@ -182,11 +194,10 @@ if ($lieu_id > 0) {
                 <h3 class="text-warning mt-0">⚠️ Action irréversible</h3>
                 <p class="font-normal text-dark">Saisissez <strong>CONFIRMER</strong> ci-dessous pour supprimer ce stockage :
                 </p>
-                <form action="lieux" method="POST" class="flex-center">
+                <form action="lieux.php" method="POST" class="flex-center">
                     <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                     <input type="hidden" name="action" value="supprimer_lieu">
                     <input type="hidden" name="lieu_id" value="<?php echo $lieu_id; ?>">
-
                     <input type="text" name="confirmation_text" required placeholder="Tapez ici..."
                         class="input-field flex-1 mb-0">
                     <button type="submit" class="btn btn-danger-dark">Valider</button>
@@ -239,7 +250,17 @@ if ($lieu_id > 0) {
                                     <tr class="item-row"
                                         data-nom="<?php echo htmlspecialchars(strtolower($article['materiel_nom'])); ?>"
                                         data-peremp="<?php echo $raw_date; ?>">
-                                        <td class="font-bold text-dark"><?php echo htmlspecialchars($article['materiel_nom']); ?></td>
+                                        <td class="font-bold text-dark">
+                                            <?php echo htmlspecialchars($article['materiel_nom']); ?>
+                                            <?php if (!empty($article['poche'])): ?>
+                                                <div class="text-sm mt-5" style="color: #1976D2;">🎒
+                                                    <?php echo htmlspecialchars($article['poche']); ?></div>
+                                            <?php endif; ?>
+                                            <?php if (!empty($article['note'])): ?>
+                                                <div class="text-sm mt-5" style="color: #e65100;">📝
+                                                    <?php echo htmlspecialchars($article['note']); ?></div>
+                                            <?php endif; ?>
+                                        </td>
                                         <td class="text-center text-muted"><?php echo $affichage_date; ?></td>
                                         <td class="text-center font-bold text-lg"><?php echo $article['quantite']; ?></td>
                                     </tr>
@@ -272,7 +293,7 @@ else {
     <?php if ($peut_editer): ?>
         <div id="form-nouveau-lieu" class="form-box-edit" style="display: none;">
             <h3 class="mt-0">Créer un nouveau stockage</h3>
-            <form action="lieux" method="POST" class="flex-row align-center">
+            <form action="lieux.php" method="POST" class="flex-row align-center">
                 <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                 <input type="hidden" name="action" value="creer_lieu">
 
@@ -326,7 +347,7 @@ else {
                 $type_affichage = 'Réserve';
             $icone = !empty($lieu['icone']) ? $lieu['icone'] : '🎒';
             ?>
-            <a href="lieux?id=<?php echo $lieu['id']; ?>"
+            <a href="lieux.php?id=<?php echo $lieu['id']; ?>"
                 class="card-sac <?php echo ($lieu['est_reserve'] == 1) ? 'border-blue' : ''; ?>">
                 <?php if ($lieu['est_reserve'] == 1): ?>
                     <div class="badge-reserve-abs">📦 RÉSERVE</div>

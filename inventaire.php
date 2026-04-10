@@ -3,6 +3,7 @@
 require_once 'includes/auth.php';
 require_once 'config/db.php';
 require_once 'includes/functions.php';
+$peut_editer = $peut_editer_matos;
 
 $message = '';
 $action = $_GET['action'] ?? 'resume';
@@ -515,7 +516,8 @@ if ($action === 'rapport') {
                     résumé</a>
                 <h2 class="page-title mt-10">📊 Rapport d'inventaire</h2>
                 <p class="mt-5 mb-0 text-muted font-italic">Clôturé le
-                    <?php echo date('d/m/Y à H:i', strtotime($inv['date_fin'])); ?></p>
+                    <?php echo date('d/m/Y à H:i', strtotime($inv['date_fin'])); ?>
+                </p>
             </div>
             <div class="no-print flex-center">
                 <a href="inventaire?action=export_rapport_xls&id=<?php echo $inv_id; ?>" class="btn btn-success-dark">📥
@@ -733,7 +735,7 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
                                     $theo = $art['quantite'];
                                     $mat_id = $art['materiel_id'];
 
-                                    $est_item_radio = ($est_malle_radio && estTypeRadio($art['materiel_nom']));
+                                    $est_item_radio = estTypeRadio($art['materiel_nom']);
                                     $est_item_dsa = ($est_sac_dsa && estTypeDSA($art['materiel_nom']));
                                     $est_item_check = ($art['check_fonctionnel'] == 1);
 
@@ -1055,7 +1057,7 @@ else {
             <div class="text-sm text-muted">Objets en circulation</div>
         </div>
         <?php if ($dernier_inv): ?>
-            <a href="inventaire?action=rapport&id=<?php echo $dernier_inv['id']; ?>"
+            <a href="inventaire.php?action=rapport&id=<?php echo $dernier_inv['id']; ?>"
                 class="carte-animee white-box flex-1 text-center mb-0"
                 style="text-decoration: none; border-bottom: 4px solid #f1c40f; display: block;">
                 <div class="text-sm text-muted" style="text-transform: uppercase;">Dernier pointage</div>
@@ -1073,61 +1075,116 @@ else {
 
     <div class="text-center mb-30" style="display: flex; justify-content: center; gap: 15px; flex-wrap: wrap;">
         <?php if ($peut_editer): ?>
-            <a href="inventaire?action=lancer"
+            <a href="inventaire.php?action=lancer"
                 onclick="return confirm('Êtes-vous sûr de vouloir lancer un nouvel inventaire global ?');"
                 class="btn btn-danger-dark btn-lg carte-animee">FAIRE L'INVENTAIRE</a>
         <?php endif; ?>
-        <a href="inventaire?action=export_xls" class="btn btn-success-dark btn-lg carte-animee"
+        <a href="inventaire.php?action=export_xls" class="btn btn-success-dark btn-lg carte-animee"
             style="background-color: #2e7d32; border-color: #1b5e20;">EXPORTER L'ÉTAT ACTUEL DES STOCKS (.xls)</a>
     </div>
 
     <div class="white-box">
         <h2 class="section-title">Répartition globale des stocks</h2>
+
+        <div class="flex-row-sm align-center bg-white p-10 mb-20 border-radius-4" style="border: 1px solid #e0e0e0;">
+            <strong class="text-dark">🔍 Chercher un matériel :</strong>
+            <input type="text" id="searchRepartition" onkeyup="filtrerRepartition()"
+                placeholder="Ex: Tensiomètre, compresses..." class="input-field flex-1 min-w-150 mb-0">
+        </div>
+
         <?php if (empty($repartition_triee)): ?>
             <p class="text-center text-muted font-italic">Aucun matériel en stock.</p>
         <?php else: ?>
-            <?php foreach ($repartition_triee as $categorie => $materiels_liste): ?>
-                <div class="mb-30">
-                    <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
-                    <h3 class="category-header"
-                        style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                        <?php echo htmlspecialchars($categorie); ?>
-                    </h3>
-                    <div class="table-responsive">
-                        <table class="table-manager" style="border: 1px solid #eee;">
-                            <thead>
-                                <tr>
-                                    <th style="width: 40%; border-bottom: 1px solid #ddd;">Nom du matériel</th>
-                                    <th style="border-bottom: 1px solid #ddd;">Répartition par lieux (Sacs & Réserves)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($materiels_liste as $nom_mat => $lieux): ?>
-                                    <?php $somme_totale_objet = 0;
-                                    foreach ($lieux as $l) {
-                                        $somme_totale_objet += $l['quantite'];
-                                    } ?>
-                                    <tr style="border-bottom: 1px solid #eee;">
-                                        <td class="font-bold text-dark" style="border-right: 1px solid #eee;">
-                                            <?php echo htmlspecialchars($nom_mat); ?>
-                                            <div class="text-sm text-muted mt-5">Total dispo :
-                                                <strong><?php echo $somme_totale_objet; ?></strong>
-                                            </div>
-                                        </td>
-                                        <td class="text-md text-muted">
-                                            <div class="flex-row-sm"><?php foreach ($lieux as $l): ?><span class="badge"
-                                                        style="background: #f4f7f6; border: 1px solid #e0e0e0; color: #555;"><strong><?php echo htmlspecialchars($l['lieu']); ?></strong>
-                                                        : <?php echo $l['quantite']; ?></span><?php endforeach; ?></div>
-                                        </td>
+            <div id="liste-repartition">
+                <?php foreach ($repartition_triee as $categorie => $materiels_liste): ?>
+                    <div class="mb-30 repartition-category">
+                        <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
+                        <h3 class="category-header"
+                            style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
+                            <?php echo htmlspecialchars($categorie); ?>
+                        </h3>
+                        <div class="table-responsive">
+                            <table class="table-manager" style="border: 1px solid #eee;">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 40%; border-bottom: 1px solid #ddd;">Nom du matériel</th>
+                                        <th style="border-bottom: 1px solid #ddd;">Répartition par lieux (Sacs & Réserves)</th>
                                     </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($materiels_liste as $nom_mat => $lieux): ?>
+                                        <?php $somme_totale_objet = 0;
+                                        foreach ($lieux as $l) {
+                                            $somme_totale_objet += $l['quantite'];
+                                        } ?>
+                                        <tr class="repartition-row" style="border-bottom: 1px solid #eee;">
+                                            <td class="font-bold text-dark mat-name" style="border-right: 1px solid #eee;">
+                                                <?php echo htmlspecialchars($nom_mat); ?>
+                                                <div class="text-sm text-muted mt-5">Total dispo :
+                                                    <strong><?php echo $somme_totale_objet; ?></strong>
+                                                </div>
+                                            </td>
+                                            <td class="text-md text-muted">
+                                                <div class="flex-row-sm">
+                                                    <?php foreach ($lieux as $l): ?>
+                                                        <span class="badge"
+                                                            style="background: #f4f7f6; border: 1px solid #e0e0e0; color: #555;">
+                                                            <strong><?php echo htmlspecialchars($l['lieu']); ?></strong> :
+                                                            <?php echo $l['quantite']; ?>
+                                                        </span>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                </div>
-            <?php endforeach; ?>
+                <?php endforeach; ?>
+            </div>
+            <p id="noResultMsg" class="text-center text-muted font-italic" style="display: none;">Aucun matériel ne correspond à
+                votre recherche.</p>
         <?php endif; ?>
     </div>
+
+    <script>
+        function filtrerRepartition() {
+            let input = document.getElementById('searchRepartition').value.toLowerCase();
+            let categories = document.querySelectorAll('.repartition-category');
+            let hasGlobalResult = false;
+
+            categories.forEach(cat => {
+                let rows = cat.querySelectorAll('.repartition-row');
+                let catHasVisibleRow = false;
+
+                rows.forEach(row => {
+                    let matName = row.querySelector('.mat-name').textContent.toLowerCase();
+
+                    if (matName.includes(input)) {
+                        row.style.display = '';
+                        catHasVisibleRow = true;
+                        hasGlobalResult = true;
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+
+                // On cache la catégorie entière s'il n'y a aucun résultat dedans
+                if (catHasVisibleRow) {
+                    cat.style.display = 'block';
+                } else {
+                    cat.style.display = 'none';
+                }
+            });
+
+            // Affichage du message si tout est caché
+            let noResultMsg = document.getElementById('noResultMsg');
+            if (noResultMsg) {
+                noResultMsg.style.display = hasGlobalResult ? 'none' : 'block';
+            }
+        }
+    </script>
     <?php
 }
 require_once 'includes/footer.php';

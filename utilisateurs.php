@@ -4,7 +4,7 @@ require_once 'includes/auth.php';
 require_once 'config/db.php';
 
 // SÉCURITÉ : Seul un admin a le droit d'être ici !
-if ($_SESSION['role'] !== 'admin') {
+if (!$est_admin) {
     die("<div class='alert alert-danger'>🛑 Accès refusé. Seuls les administrateurs peuvent gérer les utilisateurs.</div>");
 }
 
@@ -14,9 +14,8 @@ if ($_SESSION['role'] !== 'admin') {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // --- VÉRIFICATION DU JETON CSRF ---
     if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
-        die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité (Jeton CSRF invalide ou expiré). Veuillez recharger la page.</div>");
+        die("<div style='padding: 20px; background: #ffebee; color: #c62828; font-weight: bold; border-radius: 5px; margin: 20px;'>🛑 Action bloquée : Erreur de sécurité.</div>");
     }
-    // ----------------------------------
 
     $action = $_POST['action'] ?? '';
 
@@ -24,15 +23,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'ajouter_utilisateur') {
         $nom = trim($_POST['nom_utilisateur']);
         $mdp = $_POST['mot_de_passe'];
-        $role = $_POST['role'] ?? 'secouriste';
+        $role = $_POST['role'] ?? 'consultation';
 
         if (!empty($nom) && !empty($mdp)) {
             $hash = password_hash($mdp, PASSWORD_DEFAULT);
             try {
+                // On n'insère plus can_view et can_edit, seul le rôle compte
                 $stmt = $pdo->prepare("INSERT INTO utilisateurs (nom_utilisateur, mot_de_passe, role) VALUES (?, ?, ?)");
                 $stmt->execute([$nom, $hash, $role]);
                 $_SESSION['flash_success'] = "✅ L'utilisateur '$nom' a été créé avec succès.";
-                // Si la fonction logAction existe dans auth.php ou db.php, on l'appelle
+
                 if (function_exists('logAction'))
                     logAction($pdo, "Création du compte local : $nom (Rôle: $role)");
             } catch (PDOException $e) {
@@ -43,29 +43,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         } else {
-            $_SESSION['flash_error'] = "❌ Le nom et le mot de passe sont obligatoires pour un compte local.";
+            $_SESSION['flash_error'] = "❌ Le nom et le mot de passe sont obligatoires.";
         }
         header('Location: utilisateurs.php');
         exit;
     }
 
-    // --- MODIFICATION DES DROITS ---
-    elseif ($action === 'modifier_droits') {
+    // --- MODIFICATION DES RÔLES ---
+    elseif ($action === 'modifier_role') {
         $u_id = (int) $_POST['user_id'];
         $role = $_POST['role'];
-        $can_view = isset($_POST['can_view']) ? 1 : 0;
-        $can_edit = isset($_POST['can_edit']) ? 1 : 0;
 
         // On empêche un admin de se retirer ses propres droits par erreur
         if ($u_id === $_SESSION['user_id']) {
             $role = 'admin';
-            $can_view = 1;
-            $can_edit = 1;
         }
 
-        $stmt = $pdo->prepare("UPDATE utilisateurs SET role = ?, can_view = ?, can_edit = ? WHERE id = ?");
-        $stmt->execute([$role, $can_view, $can_edit, $u_id]);
-        $_SESSION['flash_success'] = "✅ Droits mis à jour avec succès !";
+        $stmt = $pdo->prepare("UPDATE utilisateurs SET role = ? WHERE id = ?");
+        $stmt->execute([$role, $u_id]);
+        $_SESSION['flash_success'] = "✅ Rôle mis à jour avec succès !";
 
         header('Location: utilisateurs.php');
         exit;
@@ -74,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // --- SUPPRESSION D'UN UTILISATEUR ---
     elseif ($action === 'supprimer_utilisateur') {
         $u_id = (int) $_POST['user_id'];
-        if ($u_id !== $_SESSION['user_id']) { // On ne se supprime pas soi-même
+        if ($u_id !== $_SESSION['user_id']) {
             $pdo->prepare("DELETE FROM utilisateurs WHERE id = ?")->execute([$u_id]);
             $_SESSION['flash_success'] = "🗑️ Utilisateur supprimé.";
         } else {
@@ -88,17 +84,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // =========================================================================
 // 2. RÉCUPÉRATION DES DONNÉES
 // =========================================================================
-$utilisateurs = $pdo->query("SELECT * FROM utilisateurs ORDER BY role ASC, nom_utilisateur ASC")->fetchAll();
+$utilisateurs = $pdo->query("SELECT id, nom_utilisateur, role FROM utilisateurs ORDER BY role ASC, nom_utilisateur ASC")->fetchAll();
 
-// =========================================================================
-// 3. AFFICHAGE HTML
-// =========================================================================
 require_once 'includes/header.php';
 ?>
 
 <div class="white-box">
-    <h2 class="page-title border-bottom pb-10">👥 Gestion des Accréditations</h2>
-    <p class="text-muted mb-20">Gérez ici qui peut consulter et qui peut modifier le stock de l'association.</p>
+    <h2 class="page-title border-bottom pb-10">👥 Gestion des Utilisateurs et Rôles</h2>
+    <p class="text-muted mb-20">Attribuez ici les permissions aux différents membres de l'association.</p>
 
     <div class="form-container mb-30">
         <h3 class="section-title">➕ Créer un compte local (Hors CAS)</h3>
@@ -120,10 +113,12 @@ require_once 'includes/header.php';
             </div>
 
             <div class="flex-1 min-w-150">
-                <label class="font-bold text-dark display-block mb-5">Rôle</label>
+                <label class="font-bold text-dark display-block mb-5">Rôle attribué</label>
                 <select name="role" class="input-field">
-                    <option value="secouriste">Secouriste</option>
-                    <option value="admin">Administrateur</option>
+                    <option value="consultation">👀 Consultation (Défaut)</option>
+                    <option value="matos">🎒 Équipe Matos</option>
+                    <option value="operationnel">🚑 Opérationnel (DPS)</option>
+                    <option value="admin">👑 Administrateur</option>
                 </select>
             </div>
 
@@ -132,8 +127,7 @@ require_once 'includes/header.php';
             </div>
         </form>
         <p class="text-sm text-muted mt-10 mb-0">
-            ℹ️ <i>Ces utilisateurs devront se connecter via le formulaire classique, sans utiliser le bouton CAS de
-                l'UTC.</i>
+            ℹ️ <i>Tous les nouveaux comptes (créés ici ou via CAS) ont le rôle "Consultation" par défaut.</i>
         </p>
     </div>
 
@@ -141,50 +135,40 @@ require_once 'includes/header.php';
         <table class="table-manager">
             <thead>
                 <tr>
-                    <th>Utilisateur</th>
-                    <th class="text-center">Rôle</th>
-                    <th class="text-center">Peut Voir (Consultation)</th>
-                    <th class="text-center">Peut Éditer (Action)</th>
-                    <th class="text-center">Actions</th>
+                    <th style="width: 40%;">Utilisateur</th>
+                    <th class="text-center" style="width: 40%;">Niveau d'accès (Rôle)</th>
+                    <th class="text-center" style="width: 20%;">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($utilisateurs as $u):
                     $est_moi = ($u['id'] == $_SESSION['user_id']);
-                    $est_nouveau = ($u['can_view'] == 0 && $u['role'] !== 'admin');
-                    // On crée un ID unique pour lier les inputs au formulaire de cette ligne (Astuce HTML5)
                     $form_id = "form_edit_" . $u['id'];
                     ?>
                     <tr>
                         <td class="font-bold text-dark">
                             <form id="<?php echo $form_id; ?>" method="POST" action="" class="mb-0">
                                 <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                                <input type="hidden" name="action" value="modifier_droits">
+                                <input type="hidden" name="action" value="modifier_role">
                                 <input type="hidden" name="user_id" value="<?php echo $u['id']; ?>">
                             </form>
 
                             <?php echo htmlspecialchars($u['nom_utilisateur']); ?>
                             <?php if ($est_moi)
                                 echo "<span class='text-muted text-sm ml-10'>(Vous)</span>"; ?>
-                            <?php if ($est_nouveau)
-                                echo "<span class='badge badge-warning ml-10'>EN ATTENTE</span>"; ?>
                         </td>
 
                         <td class="text-center">
-                            <select name="role" form="<?php echo $form_id; ?>" class="input-field" <?php echo $est_moi ? 'disabled' : ''; ?> style="padding: 5px; width: auto; margin: 0 auto;">
-                                <option value="user" <?php echo ($u['role'] === 'user') ? 'selected' : ''; ?>>Secouriste
-                                </option>
-                                <option value="admin" <?php echo ($u['role'] === 'admin') ? 'selected' : ''; ?>>Administrateur
-                                </option>
+                            <select name="role" form="<?php echo $form_id; ?>" class="input-field" <?php echo $est_moi ? 'disabled' : ''; ?> style="padding: 8px; width: 80%; margin: 0 auto; font-weight: bold;">
+                                <option value="consultation" <?php echo ($u['role'] === 'consultation') ? 'selected' : ''; ?>>
+                                    👀 Consultation</option>
+                                <option value="matos" <?php echo ($u['role'] === 'matos') ? 'selected' : ''; ?>>🎒 Équipe
+                                    Matos</option>
+                                <option value="operationnel" <?php echo ($u['role'] === 'operationnel') ? 'selected' : ''; ?>>
+                                    🚑 Opérationnel (DPS)</option>
+                                <option value="admin" <?php echo ($u['role'] === 'admin') ? 'selected' : ''; ?>>👑
+                                    Administrateur</option>
                             </select>
-                        </td>
-
-                        <td class="text-center">
-                            <input type="checkbox" name="can_view" value="1" form="<?php echo $form_id; ?>" <?php echo ($u['can_view'] || $u['role'] === 'admin') ? 'checked' : ''; ?>     <?php echo $est_moi ? 'disabled' : ''; ?> style="transform: scale(1.3);">
-                        </td>
-
-                        <td class="text-center">
-                            <input type="checkbox" name="can_edit" value="1" form="<?php echo $form_id; ?>" <?php echo ($u['can_edit'] || $u['role'] === 'admin') ? 'checked' : ''; ?>     <?php echo $est_moi ? 'disabled' : ''; ?> style="transform: scale(1.3);">
                         </td>
 
                         <td class="text-center">
