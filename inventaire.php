@@ -930,10 +930,27 @@ elseif ($inventaire_actif && $action === 'comptage' && $lieu_id > 0) {
         document.addEventListener('DOMContentLoaded', function () {
             checkGlobalSpecialState();
         });
+        // ... ton code JS existant ...
+        document.addEventListener('DOMContentLoaded', function () {
+            checkGlobalSpecialState();
+        });
+
+        // --- NOUVEAU : Système de maintien de session (Ping) ---
+        // Envoie une requête invisible au serveur toutes les 15 minutes (15 * 60 * 1000 millisecondes)
+        setInterval(function() {
+            fetch('ping.php')
+                .then(response => {
+                    if (!response.ok) {
+                        console.warn("⚠️ Attention : Le maintien de session a échoué.");
+                    } else {
+                        console.log("🔄 Session d'inventaire prolongée avec succès.");
+                    }
+                })
+                .catch(err => console.error("Erreur réseau lors du ping", err));
+        }, 15 * 60 * 1000);
     </script>
     <?php
 }
-
 // ==========================================
 // VUE SELECTION DES LIEUX
 // ==========================================

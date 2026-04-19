@@ -412,6 +412,19 @@ require_once 'includes/header.php';
             document.getElementById('form-verification').submit();
         }
     }
+    // --- NOUVEAU : Système de maintien de session (Ping) ---
+    // Envoie une requête invisible au serveur toutes les 15 minutes (15 * 60 * 1000 millisecondes)
+    setInterval(function() {
+        fetch('ping.php')
+            .then(response => {
+                if (!response.ok) {
+                    console.warn("⚠️ Attention : Le maintien de session a échoué.");
+                } else {
+                    console.log("🔄 Session prolongée avec succès.");
+                }
+            })
+            .catch(err => console.error("Erreur réseau lors du ping", err));
+    }, 15 * 60 * 1000);
 </script>
 
 <?php require_once 'includes/footer.php'; ?>
