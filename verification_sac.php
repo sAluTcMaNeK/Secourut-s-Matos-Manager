@@ -54,9 +54,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_verification'
             $counted = isset($data['counted']) ? (int) $data['counted'] : 0;
             $final_qty = isset($data['final_qty']) ? (int) $data['final_qty'] : $counted;
             $mat_id = (int) $data['materiel_id'];
-            $note = trim($data['note'] ?? ''); // NOUVEAU : Récupération de la note modifiée
+            $note = trim($data['note'] ?? ''); 
 
-            // On récupère les infos de base avant toute modification
             $stmt_orig = $pdo->prepare("SELECT poche FROM stocks WHERE id = ?");
             $stmt_orig->execute([$stock_id]);
             $orig_data = $stmt_orig->fetch();
@@ -71,7 +70,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_verification'
             $reserve_stock_id = $data['reserve_stock_id'] ?? '';
             $added_date = !empty($data['added_date']) ? $data['added_date'] : null;
 
-            // 1. Mise à jour de la ligne originale (quantité + note)
+            // --- SÉCURITÉ PHP : Bloquer si l'ajout n'a pas de source ---
+            if ($added_qty > 0 && empty($reserve_stock_id)) {
+                throw new Exception("Erreur : Vous avez ajouté du matériel sans sélectionner de réserve de provenance.");
+            }
+            // -----------------------------------------------------------
+
+            // 1. Mise à jour de la ligne originale
             if ($counted === 0) {
                 $pdo->prepare("DELETE FROM stocks WHERE id = ?")->execute([$stock_id]);
             } else {
@@ -142,14 +147,23 @@ foreach ($stocks as $s) {
     $stocks_par_groupe[$nom_groupe][] = $s;
 }
 
+// Récupération et filtrage des réserves selon la date de l'événement
+$date_event_timestamp = strtotime($event['date_evenement']);
+$date_event_format_html = date('Y-m-d', $date_event_timestamp); // Pour l'attribut min des calendriers
+
 $stmt_reserves = $pdo->query("SELECT s.id as reserve_stock_id, s.materiel_id, s.quantite, s.date_peremption, l.nom as lieu_nom FROM stocks s JOIN lieux_stockage l ON s.lieu_id = l.id WHERE l.est_reserve = 1 AND s.quantite > 0 ORDER BY s.date_peremption ASC");
 $toutes_les_reserves = $stmt_reserves->fetchAll();
 $reserves_par_materiel = [];
+
 foreach ($toutes_les_reserves as $res) {
+    // Si le matériel a une date de péremption, on vérifie qu'elle n'est pas passée (ou égale) au jour du DPS
+    if (!empty($res['date_peremption'])) {
+        if (strtotime($res['date_peremption']) < $date_event_timestamp) {
+            continue; // On saute ce lot, il est périmé pour ce DPS !
+        }
+    }
     $reserves_par_materiel[$res['materiel_id']][] = $res;
 }
-
-$date_event_timestamp = strtotime($event['date_evenement']);
 
 require_once 'includes/header.php';
 ?>
@@ -177,7 +191,8 @@ require_once 'includes/header.php';
         <ul class="mt-5 mb-0 text-md text-muted" style="padding-left: 20px;">
             <li><strong class="text-danger">Compté :</strong> Ce qui est physiquement dans le sac en l'ouvrant.</li>
             <li><strong class="text-success">Final :</strong> Ce qui restera dans le sac une fois prêt à partir.</li>
-            <li>Si vous devez rajouter du matériel (Final > Compté), le système vous demandera d'où il provient.</li>
+            <li>Si vous devez rajouter du matériel (Final > Compté), le système vous demandera d'où il provient. Il est possible d'ajouter du matériel qui n'est pas invntorié ("ajout externe")</li>
+            <li><strong class="text-danger">Si le sac contient du matériel périmé :</strong> Une alerte s'affiche demandant le retrait du matériel. Par défaut, les soldes compté et final seront définits à 0.</li>
         </ul>
     </div>
 
@@ -279,7 +294,7 @@ require_once 'includes/header.php';
 
                                 <td class="text-center p-10">
                                     <input type="number" min="0" name="stock[<?php echo $sid; ?>][final_qty]" id="final-<?php echo $sid; ?>"
-                                        value="<?php echo $theo; ?>" 
+                                        value="<?php echo $est_perime ? 0 : $theo; ?>" 
                                         oninput="checkDifferenceVerif(<?php echo $sid; ?>)" 
                                         style="width: 60px; padding: 6px; text-align: center; border: 2px solid #4caf50; border-radius: 4px; font-weight: bold; color: #2e7d32; background-color: #f1f8e9;">
                                 </td>
@@ -308,6 +323,7 @@ require_once 'includes/header.php';
                                         <div class="manual-date-container flex-center ml-10" id="manual-date-<?php echo $sid; ?>" style="display: none;">
                                             <label class="text-sm font-bold text-dark">Péremption des nouveaux :</label>
                                             <input type="date" name="stock[<?php echo $sid; ?>][added_date]"
+                                                min="<?php echo $date_event_format_html; ?>"
                                                 style="padding: 6px; border: 1px solid #aaa; border-radius: 3px;">
                                         </div>
                                     </div>
@@ -407,24 +423,28 @@ require_once 'includes/header.php';
         checkGlobalSpecialState();
     });
 
-    function validerFormulaireVerification() {
-        if(confirm('Êtes-vous sûr de vouloir sceller ce sac avec les quantités indiquées ?')) {
-            document.getElementById('form-verification').submit();
-        }
-    }
-    // --- NOUVEAU : Système de maintien de session (Ping) ---
-    // Envoie une requête invisible au serveur toutes les 15 minutes (15 * 60 * 1000 millisecondes)
+    // --- Maintien de session ---
     setInterval(function() {
         fetch('ping.php')
             .then(response => {
-                if (!response.ok) {
-                    console.warn("⚠️ Attention : Le maintien de session a échoué.");
-                } else {
-                    console.log("🔄 Session prolongée avec succès.");
-                }
+                if (!response.ok) console.warn("Le maintien de session a échoué.");
             })
-            .catch(err => console.error("Erreur réseau lors du ping", err));
-    }, 15 * 60 * 1000);
+            .catch(err => console.error("Erreur de ping", err));
+    }, 15 * 60 * 1000); 
+
+    // --- NOUVEAU : SÉCURITÉ JS POUR LES CHAMPS REQUIS ---
+    function validerFormulaireVerification() {
+        const form = document.getElementById('form-verification');
+        
+        // reportValidity() affiche l'erreur native du navigateur et bloque si un required est vide
+        if (!form.reportValidity()) {
+            return; // On arrête tout si une réserve manque
+        }
+
+        if(confirm('Êtes-vous sûr de vouloir sceller ce sac avec les quantités indiquées ?')) {
+            form.submit();
+        }
+    }
 </script>
 
 <?php require_once 'includes/footer.php'; ?>

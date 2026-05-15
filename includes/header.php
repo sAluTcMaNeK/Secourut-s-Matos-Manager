@@ -50,11 +50,11 @@ function getCouleurCategorie($nom_categorie)
             <img src="assets/img/favicon.png" alt="Logo Secourut's">
             MATOS MANAGER
         </div>
-        <a href="index.php">📊 Tableau de bord</a>
-        <a href="materiel.php">📦 Catalogue Matériel</a>
-        <a href="lieux.php">🎒 Sacs & Réserves</a>
-        <a href="remplissage.php">🚑 Vérification DPS</a>
-        <a href="inventaire.php">📋 Faire l'inventaire</a>
+        <a href="index">📊 Tableau de bord</a>
+        <a href="materiel">📦 Catalogue Matériel</a>
+        <a href="lieux">🎒 Sacs & Réserves</a>
+        <a href="remplissage">🚑 Vérification DPS</a>
+        <a href="inventaire">📋 Faire l'inventaire</a>
 
         <?php if ($est_admin): ?>
             <a href="parametres.php" style="margin-top: 15px;" class="admin-link">⚙️ Paramètres</a>

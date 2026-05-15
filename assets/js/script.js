@@ -1,10 +1,7 @@
 // ==========================================
 // 1. UTILITAIRES GLOBAUX & RECHERCHE
 // ==========================================
-function toggleMenu() {
-    document.getElementById('sidebar').classList.toggle('active');
-    document.getElementById('overlay').classList.toggle('active');
-}
+// (La fonction toggleMenu a été retirée d'ici car elle est maintenant gérée directement et plus efficacement dans header.php)
 
 function checkMaxQty(inputElement) {
     const max = inputElement.getAttribute('max');
@@ -288,7 +285,6 @@ function toggleManualDate(val) {
     }
 }
 
-// Nouvelles fonctions pour l'édition "en ligne" dans gestion_sac.php
 function checkEditDifference(input, id, isReserve) {
     if (isReserve) return;
 
@@ -505,3 +501,142 @@ function validerFormulaireInventaire() {
     const form = document.getElementById('form-inventaire');
     if (form) form.submit();
 }
+
+// ==========================================
+// 6. PAGE : CATALOGUE MATÉRIEL (materiel.php)
+// ==========================================
+function ouvrirEdition(id, nom, cat_id, fournisseur, seuil, check_fonctionnel = 0) {
+    const editId = document.getElementById('edit_id');
+    
+    if (editId) {
+        editId.value = id;
+        document.getElementById('edit_nom').value = nom;
+        document.getElementById('edit_categorie_id').value = cat_id;
+        document.getElementById('edit_fournisseur').value = fournisseur;
+        document.getElementById('edit_seuil_alerte').value = seuil;
+
+        // Nouvelle gestion de la case à cocher Fonctionnelle
+        const cbFonctionnel = document.getElementById('edit_check_fonctionnel');
+        if (cbFonctionnel) cbFonctionnel.checked = (check_fonctionnel == 1);
+
+        document.getElementById('bloc-ajout').style.display = 'none';
+        document.getElementById('bloc-edition').style.display = 'block';
+
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+}
+
+function fermerEdition() {
+    const blocEdition = document.getElementById('bloc-edition');
+    if (blocEdition) {
+        blocEdition.style.display = 'none';
+        document.getElementById('bloc-ajout').style.display = 'block';
+    }
+}
+
+// ==========================================
+// 7. RECHERCHE DANS LE CATALOGUE (materiel.php)
+// ==========================================
+function filtrerCatalogue() {
+    let input = document.getElementById('searchCatalogue');
+    if (!input) return;
+    
+    // On met tout en minuscules pour que la recherche ignore les majuscules
+    let filter = input.value.toLowerCase(); 
+    let rows = document.querySelectorAll('.catalogue-row');
+    
+    // 1. Filtrer les lignes individuelles
+    rows.forEach(row => {
+        let nom = row.getAttribute('data-nom') || '';
+        if (nom.includes(filter)) {
+            row.style.display = ''; // On affiche
+        } else {
+            row.style.display = 'none'; // On cache
+        }
+    });
+
+    // 2. Cacher les tableaux entiers s'ils sont vides !
+    document.querySelectorAll('.catalogue-block').forEach(block => {
+        // On cherche combien de lignes sont encore visibles dans cette catégorie
+        let visibleRows = block.querySelectorAll('.catalogue-row:not([style*="display: none"])');
+        
+        if (visibleRows.length === 0) {
+            block.style.display = 'none'; // Catégorie vide, on la cache
+        } else {
+            block.style.display = 'block'; // Au moins 1 résultat, on l'affiche
+        }
+    });
+}
+
+// ==========================================
+// 8. AUTO-SAUVEGARDE (Brouillon Anti-Perte)
+// ==========================================
+document.addEventListener('DOMContentLoaded', function() {
+    // On cible uniquement les pages d'inventaire et de vérification
+    const form = document.querySelector('#form-inventaire, #form-verification');
+    if (!form) return;
+
+    // On crée une "clé" unique pour ce sac précis (pour ne pas mélanger les brouillons)
+    const urlParams = new URLSearchParams(window.location.search);
+    const lieuId = urlParams.get('lieu_id') || '0';
+    const eventId = urlParams.get('event_id') || '0';
+    const saveKey = 'autosave_sac_' + lieuId + '_evt_' + eventId;
+
+    // ----------------------------------------------------
+    // 1. RESTAURATION (Quand la page charge)
+    // ----------------------------------------------------
+    const savedData = localStorage.getItem(saveKey);
+    if (savedData) {
+        const data = JSON.parse(savedData);
+        
+        // A. On restaure les textes et les nombres (champs classiques)
+        for (const [name, value] of Object.entries(data.inputs || {})) {
+            const input = form.querySelector(`[name="${name}"]`);
+            if (input) {
+                input.value = value;
+                // On déclenche l'événement pour que les lignes deviennent vertes/rouges
+                input.dispatchEvent(new Event('input'));
+            }
+        }
+        
+        // B. On restaure les cases à cocher spéciales (Radios / DSA)
+        for (const [index, isChecked] of Object.entries(data.checkboxes || {})) {
+            const checkboxes = form.querySelectorAll('input[type="checkbox"]');
+            if (checkboxes[index]) {
+                checkboxes[index].checked = isChecked;
+                // On déclenche l'événement pour mettre à jour la logique des boutons
+                checkboxes[index].dispatchEvent(new Event('change'));
+            }
+        }
+    }
+
+    // ----------------------------------------------------
+    // 2. SAUVEGARDE SILENCIEUSE (À chaque clic/frappe)
+    // ----------------------------------------------------
+    form.addEventListener('input', saveToLocal);
+    form.addEventListener('change', saveToLocal);
+
+    function saveToLocal() {
+        let data = { inputs: {}, checkboxes: {} };
+        
+        // Sauvegarde de tous les champs qui ont un "name"
+        form.querySelectorAll('input[name], select[name]').forEach(el => {
+            data.inputs[el.name] = el.value;
+        });
+        
+        // Sauvegarde de l'état de TOUTES les cases à cocher par leur index
+        form.querySelectorAll('input[type="checkbox"]').forEach((el, index) => {
+            data.checkboxes[index] = el.checked;
+        });
+
+        // Enregistrement dans la mémoire du téléphone/navigateur
+        localStorage.setItem(saveKey, JSON.stringify(data));
+    }
+
+    // ----------------------------------------------------
+    // 3. NETTOYAGE (Quand on valide officiellement)
+    // ----------------------------------------------------
+    form.addEventListener('submit', function() {
+        localStorage.removeItem(saveKey);
+    });
+});
