@@ -13,6 +13,12 @@ if (!$peut_verifier_sceller) {
     exit;
 }
 
+// --- MISE À JOUR SILENCIEUSE DE LA STRUCTURE (Traçabilité) ---
+try {
+    $pdo->exec("ALTER TABLE evenements_lieux ADD COLUMN scelle_par VARCHAR(255) DEFAULT NULL");
+    $pdo->exec("ALTER TABLE evenements_lieux ADD COLUMN scelle_le DATETIME DEFAULT NULL");
+} catch (PDOException $e) { }
+
 $stmt_ev = $pdo->prepare("SELECT * FROM evenements WHERE id = ?");
 $stmt_ev->execute([$event_id]);
 $event = $stmt_ev->fetch();
@@ -111,7 +117,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['valider_verification'
                 }
             }
         }
-        $pdo->prepare("UPDATE evenements_lieux SET statut = 'valide' WHERE evenement_id = ? AND lieu_id = ?")->execute([$event_id, $lieu_id]);
+        
+        // MODIFICATION ICI : On enregistre QUI scelle et QUAND
+        $pdo->prepare("UPDATE evenements_lieux SET statut = 'valide', scelle_par = ?, scelle_le = NOW() WHERE evenement_id = ? AND lieu_id = ?")->execute([$_SESSION['username'], $event_id, $lieu_id]);
+        
         $pdo->prepare("INSERT INTO historique_actions (nom_utilisateur, action, date_action) VALUES (?, ?, NOW())")->execute([$_SESSION['username'], "A vérifié et scellé le sac '" . $lieu['nom'] . "' pour le DPS '" . $event['nom'] . "'"]);
 
         $pdo->commit();

@@ -16,6 +16,18 @@ try {
     }
 }
 
+// --- MISE À JOUR SILENCIEUSE DE LA STRUCTURE (Traçabilité) ---
+// Ajout des colonnes pour savoir qui a scellé et quand
+try {
+    $pdo->exec("ALTER TABLE evenements_lieux ADD COLUMN scelle_par VARCHAR(255) DEFAULT NULL");
+} catch (PDOException $e) {
+}
+try {
+    $pdo->exec("ALTER TABLE evenements_lieux ADD COLUMN scelle_le DATETIME DEFAULT NULL");
+} catch (PDOException $e) {
+}
+// -------------------------------------------------------------
+
 $action = $_GET['action'] ?? 'dashboard';
 
 // ==========================================
@@ -138,7 +150,10 @@ require_once 'includes/header.php';
 // ==========================================
 if ($action === 'dashboard') {
     $tous_les_sacs = $pdo->query("SELECT id, nom, icone FROM lieux_stockage WHERE est_reserve = 0 ORDER BY nom")->fetchAll();
-    $evenements = $pdo->query("SELECT * FROM evenements ORDER BY date_evenement ASC")->fetchAll();
+
+    // NOUVEAU : On ne garde que les DPS à venir (ou passés de moins de 2 jours)
+    $stmt_futurs = $pdo->query("SELECT * FROM evenements WHERE date_evenement >= DATE_SUB(CURRENT_DATE, INTERVAL 2 DAY) ORDER BY date_evenement ASC");
+    $evenements = $stmt_futurs->fetchAll();
 
     $lots = $pdo->query("SELECT * FROM lots ORDER BY nom")->fetchAll();
     $lots_sacs = [];
@@ -271,8 +286,13 @@ if ($action === 'dashboard') {
         <?php endif; ?>
 
         <div class="white-box" style="flex: 2; min-width: 400px; margin: 0;">
-            <h2 style="margin-top: 0; color: #2c3e50; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">📋 DPS et
-                Vérifications</h2>
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px; margin-bottom: 15px;">
+                <h2 style="margin: 0; color: #2c3e50;">📋 DPS et Vérifications</h2>
+                <a href="remplissage.php?action=archives"
+                    style="background-color: #ecf0f1; color: #2c3e50; padding: 8px 15px; border-radius: 4px; text-decoration: none; font-size: 14px; font-weight: bold; border: 1px solid #bdc3c7;">🗄️
+                    Archives</a>
+            </div>
 
             <?php if (empty($evenements)): ?>
                 <p style="text-align: center; color: #999; font-style: italic; padding: 20px;">Aucun événement programmé pour le
@@ -303,13 +323,16 @@ if ($action === 'dashboard') {
                                     <h3 style="margin: 0; color: #333; font-size: 18px;"><?php echo htmlspecialchars($ev['nom']); ?>
                                     </h3>
                                     <div style="font-size: 13px; color: #666; margin-top: 5px;">Prévu le :
-                                        <strong><?php echo date('d/m/Y', strtotime($ev['date_evenement'])); ?></strong></div>
+                                        <strong><?php echo date('d/m/Y', strtotime($ev['date_evenement'])); ?></strong>
+                                    </div>
                                 </div>
                                 <div style="text-align: right;">
                                     <div style="font-size: 12px; font-weight: bold; color: <?php echo $couleur_bordure; ?>;">
-                                        <?php echo $statut_texte; ?></div>
+                                        <?php echo $statut_texte; ?>
+                                    </div>
                                     <div style="font-size: 14px; font-weight: bold; color: #333; margin-top: 5px;">
-                                        <?php echo $valides; ?> / <?php echo $total; ?> sacs prêts</div>
+                                        <?php echo $valides; ?> / <?php echo $total; ?> sacs prêts
+                                    </div>
                                 </div>
                             </div>
 
@@ -393,7 +416,56 @@ if ($action === 'dashboard') {
 }
 
 // ==========================================
-// VUE : DÉTAIL D'UN ÉVÉNEMENT (Choix du sac)
+// VUE : ARCHIVES (DPS Passés)
+// ==========================================
+elseif ($action === 'archives') {
+    $stmt_passes = $pdo->query("SELECT * FROM evenements WHERE date_evenement < DATE_SUB(CURRENT_DATE, INTERVAL 2 DAY) ORDER BY date_evenement DESC");
+    $archives = $stmt_passes->fetchAll();
+    ?>
+    <div class="white-box">
+        <a href="remplissage.php" class="text-muted" style="text-decoration: none;">⬅ Retour au tableau de bord</a>
+        <h2 style="margin-top: 15px; color: #7f8c8d; border-bottom: 2px solid #eee; padding-bottom: 10px;">🗄️ Archives des
+            DPS</h2>
+
+        <?php if (empty($archives)): ?>
+            <p style="text-align: center; color: #999; padding: 40px; font-style: italic;">Aucune archive pour le moment.</p>
+        <?php else: ?>
+            <div style="display: flex; flex-direction: column; gap: 15px; margin-top: 20px;">
+                <?php foreach ($archives as $ev): ?>
+                    <div
+                        style="border: 1px solid #ddd; border-radius: 6px; padding: 15px; background: #fafafa; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong style="font-size: 16px; color: #333;"><?php echo htmlspecialchars($ev['nom']); ?></strong><br>
+                            <span class="text-muted" style="font-size: 13px;">Poste effectué le :
+                                <strong><?php echo date('d/m/Y', strtotime($ev['date_evenement'])); ?></strong></span>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <a href="remplissage.php?action=view_event&id=<?php echo $ev['id']; ?>"
+                                style="background-color: #2980b9; color: white; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 13px; font-weight: bold;">Voir
+                                l'audit 👁️</a>
+
+                            <?php if ($peut_gerer_dps): ?>
+                                <form method="POST" action="" style="margin: 0;"
+                                    onsubmit="return confirm('Supprimer définitivement cette archive ? Toutes les données de traçabilité seront perdues.');">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                                    <input type="hidden" name="action" value="delete_event">
+                                    <input type="hidden" name="event_id" value="<?php echo $ev['id']; ?>">
+                                    <button type="submit"
+                                        style="background: none; border: 1px solid #ffcdd2; color: #c62828; padding: 5px; border-radius: 4px; cursor: pointer;"
+                                        title="Supprimer définitivement">🗑️</button>
+                                </form>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+
+// ==========================================
+// VUE : DÉTAIL D'UN ÉVÉNEMENT (Choix du sac / Audit)
 // ==========================================
 elseif ($action === 'view_event' && isset($_GET['id'])) {
     $event_id = (int) $_GET['id'];
@@ -404,38 +476,77 @@ elseif ($action === 'view_event' && isset($_GET['id'])) {
     if (!$evenement)
         die("Événement introuvable.");
 
-    $stmt_sacs = $pdo->prepare("SELECT l.id, l.nom, l.icone, el.statut FROM evenements_lieux el JOIN lieux_stockage l ON el.lieu_id = l.id WHERE el.evenement_id = ?");
+    // Récupération des sacs et des colonnes de traçabilité
+    $stmt_sacs = $pdo->prepare("SELECT l.id, l.nom, l.icone, el.statut, el.scelle_par, el.scelle_le FROM evenements_lieux el JOIN lieux_stockage l ON el.lieu_id = l.id WHERE el.evenement_id = ?");
     $stmt_sacs->execute([$event_id]);
     $sacs_lies = $stmt_sacs->fetchAll();
+
+    // Vérification si le DPS est dans les archives
+    $est_archive = strtotime($evenement['date_evenement']) < strtotime('-2 days');
     ?>
 
     <div class="white-box">
-        <a href="remplissage.php" style="color: #666; text-decoration: none; font-size: 14px;">⬅ Retour aux événements</a>
-        <h2 style="margin: 10px 0 0 0; color: #2c3e50;">Préparation : <?php echo htmlspecialchars($evenement['nom']); ?>
+        <?php if ($est_archive): ?>
+            <a href="remplissage.php?action=archives" style="color: #666; text-decoration: none; font-size: 14px;">⬅ Retour aux
+                archives</a>
+        <?php else: ?>
+            <a href="remplissage.php" style="color: #666; text-decoration: none; font-size: 14px;">⬅ Retour aux événements</a>
+        <?php endif; ?>
+
+        <h2 style="margin: 10px 0 0 0; color: #2c3e50;">
+            <?php echo $est_archive ? "🗄️ Audit de l'archive :" : "Préparation :"; ?>
+            <?php echo htmlspecialchars($evenement['nom']); ?>
         </h2>
         <p style="color: #666; margin-bottom: 20px;">
-            <?php echo $peut_verifier_sceller ? "Sélectionne un sac pour commencer sa vérification." : "Voici les sacs liés à ce dispositif. Vous êtes en mode consultation."; ?>
+            <?php
+            if ($est_archive) {
+                echo "Cet événement est passé. Voici l'audit des sacs qui y étaient assignés.";
+            } else {
+                echo $peut_verifier_sceller ? "Sélectionne un sac pour commencer sa vérification." : "Voici les sacs liés à ce dispositif. Vous êtes en mode consultation.";
+            }
+            ?>
         </p>
 
         <div style="display: flex; gap: 20px; flex-wrap: wrap;">
             <?php foreach ($sacs_lies as $sac):
                 $est_valide = ($sac['statut'] === 'valide');
-                // Si l'utilisateur n'a pas les droits de vérification, on l'envoie juste "voir" le sac dans lieux.php
                 $lien_cible = $peut_verifier_sceller ? "verification_sac.php?event_id={$event_id}&lieu_id={$sac['id']}" : "lieux.php?id={$sac['id']}";
                 $texte_lien = $peut_verifier_sceller ? '👉 Vérifier ce sac' : '👁️ Consulter ce sac';
-                ?>
-                <a href="<?php echo $lien_cible; ?>" class="carte-animee"
-                    style="display: block; width: 200px; padding: 20px; background-color: <?php echo $est_valide ? '#e8f5e9' : 'white'; ?>; border: 2px solid <?php echo $est_valide ? '#4caf50' : '#ddd'; ?>; border-radius: 8px; text-decoration: none; color: #333; text-align: center; opacity: <?php echo $est_valide ? '0.8' : '1'; ?>;">
-                    <div style="font-size: 40px; margin-bottom: 10px;">
-                        <?php echo $est_valide ? '✅' : ($sac['icone'] ?: '🎒'); ?>
+
+                if ($est_archive):
+                    ?>
+                    <div
+                        style="width: 200px; padding: 20px; background-color: #fff; border: 1px solid #ddd; border-radius: 8px; text-align: center;">
+                        <div style="font-size: 40px; margin-bottom: 10px;"><?php echo ($sac['icone'] ?: '🎒'); ?></div>
+                        <strong style="font-size: 16px; display: block;"><?php echo htmlspecialchars($sac['nom']); ?></strong>
+
+                        <div
+                            style="margin-top: 15px; padding-top: 10px; border-top: 1px dashed #eee; font-size: 12px; text-align: left; background: #fafafa; padding: 10px; border-radius: 4px;">
+                            <?php if ($est_valide): ?>
+                                <div style="color: #2e7d32; font-weight: bold; margin-bottom: 5px;">✅ SCELLÉ</div>
+                                <div>👤 <strong><?php echo htmlspecialchars($sac['scelle_par'] ?: 'Inconnu'); ?></strong></div>
+                                <div style="color: #666; margin-top: 3px;">📅
+                                    <?php echo $sac['scelle_le'] ? date('d/m/Y à H:i', strtotime($sac['scelle_le'])) : 'Date inconnue'; ?>
+                                </div>
+                            <?php else: ?>
+                                <div style="color: #d32f2f; font-weight: bold; text-align: center;">❌ NON SCELLÉ</div>
+                            <?php endif; ?>
+                        </div>
                     </div>
-                    <strong
-                        style="font-size: 16px; display: block; <?php echo $est_valide ? 'text-decoration: line-through;' : ''; ?>"><?php echo htmlspecialchars($sac['nom']); ?></strong>
-                    <span
-                        style="font-size: 12px; font-weight: bold; color: <?php echo $est_valide ? '#2e7d32' : ($peut_verifier_sceller ? '#d32f2f' : '#1976D2'); ?>; margin-top: 10px; display: block;">
-                        <?php echo $est_valide ? 'Sac prêt et scellé' : $texte_lien; ?>
-                    </span>
-                </a>
+                <?php else: ?>
+                    <a href="<?php echo $lien_cible; ?>" class="carte-animee"
+                        style="display: block; width: 200px; padding: 20px; background-color: <?php echo $est_valide ? '#e8f5e9' : 'white'; ?>; border: 2px solid <?php echo $est_valide ? '#4caf50' : '#ddd'; ?>; border-radius: 8px; text-decoration: none; color: #333; text-align: center; opacity: <?php echo $est_valide ? '0.8' : '1'; ?>;">
+                        <div style="font-size: 40px; margin-bottom: 10px;">
+                            <?php echo $est_valide ? '✅' : ($sac['icone'] ?: '🎒'); ?>
+                        </div>
+                        <strong
+                            style="font-size: 16px; display: block; <?php echo $est_valide ? 'text-decoration: line-through;' : ''; ?>"><?php echo htmlspecialchars($sac['nom']); ?></strong>
+                        <span
+                            style="font-size: 12px; font-weight: bold; color: <?php echo $est_valide ? '#2e7d32' : ($peut_verifier_sceller ? '#d32f2f' : '#1976D2'); ?>; margin-top: 10px; display: block;">
+                            <?php echo $est_valide ? 'Sac prêt et scellé' : $texte_lien; ?>
+                        </span>
+                    </a>
+                <?php endif; ?>
             <?php endforeach; ?>
         </div>
     </div>
