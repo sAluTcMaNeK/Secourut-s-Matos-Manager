@@ -230,43 +230,49 @@ if ($lieu_id > 0) {
                     style="box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
                     <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
                     <h3 class="category-header"
-                        style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                        <?php echo htmlspecialchars($categorie); ?>
+                        style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;">
+                        <span><?php echo htmlspecialchars($categorie); ?></span>
+                        <span class="toggle-icon" style="transition: transform 0.2s ease; font-size: 14px;">▼</span>
                     </h3>
-                    <div class="table-responsive">
-                        <table class="table-manager">
-                            <thead>
-                                <tr>
-                                    <th style="width: 50%;">NOM DU MATÉRIEL</th>
-                                    <th class="text-center" style="width: 25%;">PÉREMPTION</th>
-                                    <th class="text-center" style="width: 25%;">QUANTITÉ</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($articles as $article):
-                                    $raw_date = $article['date_peremption'];
-                                    $affichage_date = $raw_date ? date('d/m/Y', strtotime($raw_date)) : '-';
-                                    ?>
-                                    <tr class="item-row"
-                                        data-nom="<?php echo htmlspecialchars(strtolower($article['materiel_nom'])); ?>"
-                                        data-peremp="<?php echo $raw_date; ?>">
-                                        <td class="font-bold text-dark">
-                                            <?php echo htmlspecialchars($article['materiel_nom']); ?>
-                                            <?php if (!empty($article['poche'])): ?>
-                                                <div class="text-sm mt-5" style="color: #1976D2;">🎒
-                                                    <?php echo htmlspecialchars($article['poche']); ?></div>
-                                            <?php endif; ?>
-                                            <?php if (!empty($article['note'])): ?>
-                                                <div class="text-sm mt-5" style="color: #e65100;">📝
-                                                    <?php echo htmlspecialchars($article['note']); ?></div>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td class="text-center text-muted"><?php echo $affichage_date; ?></td>
-                                        <td class="text-center font-bold text-lg"><?php echo $article['quantite']; ?></td>
+
+                    <div class="category-content">
+                        <div class="table-responsive">
+                            <table class="table-manager">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 50%;">NOM DU MATÉRIEL</th>
+                                        <th class="text-center" style="width: 25%;">PÉREMPTION</th>
+                                        <th class="text-center" style="width: 25%;">QUANTITÉ</th>
                                     </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($articles as $article):
+                                        $raw_date = $article['date_peremption'];
+                                        $affichage_date = $raw_date ? date('d/m/Y', strtotime($raw_date)) : '-';
+                                        ?>
+                                        <tr class="item-row"
+                                            data-nom="<?php echo htmlspecialchars(strtolower($article['materiel_nom'])); ?>"
+                                            data-peremp="<?php echo $raw_date; ?>">
+                                            <td class="font-bold text-dark">
+                                                <?php echo htmlspecialchars($article['materiel_nom']); ?>
+                                                <?php if (!empty($article['poche'])): ?>
+                                                    <div class="text-sm mt-5" style="color: #1976D2;">🎒
+                                                        <?php echo htmlspecialchars($article['poche']); ?>
+                                                    </div>
+                                                <?php endif; ?>
+                                                <?php if (!empty($article['note'])): ?>
+                                                    <div class="text-sm mt-5" style="color: #e65100;">📝
+                                                        <?php echo htmlspecialchars($article['note']); ?>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="text-center text-muted"><?php echo $affichage_date; ?></td>
+                                            <td class="text-center font-bold text-lg"><?php echo $article['quantite']; ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             <?php endforeach; ?>

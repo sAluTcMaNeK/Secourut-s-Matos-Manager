@@ -43,7 +43,33 @@ function filtrerInventaire() {
             }
         }
 
-        row.style.display = (textMatch && catMatch && expMatch) ? '' : 'none';
+        // Remplacement dans la fonction filtrerInventaire()
+        if (textMatch && catMatch && expMatch) {
+            row.style.display = '';
+
+            // Cherche le tableau ou la div qui contient cette ligne
+            let contentBlock = row.closest('.category-content, .table-manager, .table-responsive');
+
+            // Si la catégorie est repliée, on force son ouverture
+            if (contentBlock && contentBlock.getAttribute('data-collapsed') === 'true') {
+                contentBlock.style.display = '';
+                contentBlock.style.maxHeight = 'none';
+                contentBlock.style.opacity = '1';
+                contentBlock.style.marginTop = '';
+                contentBlock.style.marginBottom = '';
+                contentBlock.style.overflow = 'visible';
+                contentBlock.setAttribute('data-collapsed', 'false');
+
+                // Trouve le titre juste au-dessus pour remettre la flèche droite
+                let header = contentBlock.previousElementSibling;
+                if (header && header.classList.contains('category-header')) {
+                    let icon = header.querySelector('.toggle-icon');
+                    if (icon) icon.style.transform = 'rotate(0deg)';
+                }
+            }
+        } else {
+            row.style.display = 'none';
+        }
     });
 
     document.querySelectorAll('.category-block').forEach(block => {
@@ -507,7 +533,7 @@ function validerFormulaireInventaire() {
 // ==========================================
 function ouvrirEdition(id, nom, cat_id, fournisseur, seuil, check_fonctionnel = 0) {
     const editId = document.getElementById('edit_id');
-    
+
     if (editId) {
         editId.value = id;
         document.getElementById('edit_nom').value = nom;
@@ -540,11 +566,11 @@ function fermerEdition() {
 function filtrerCatalogue() {
     let input = document.getElementById('searchCatalogue');
     if (!input) return;
-    
+
     // On met tout en minuscules pour que la recherche ignore les majuscules
-    let filter = input.value.toLowerCase(); 
+    let filter = input.value.toLowerCase();
     let rows = document.querySelectorAll('.catalogue-row');
-    
+
     // 1. Filtrer les lignes individuelles
     rows.forEach(row => {
         let nom = row.getAttribute('data-nom') || '';
@@ -559,7 +585,7 @@ function filtrerCatalogue() {
     document.querySelectorAll('.catalogue-block').forEach(block => {
         // On cherche combien de lignes sont encore visibles dans cette catégorie
         let visibleRows = block.querySelectorAll('.catalogue-row:not([style*="display: none"])');
-        
+
         if (visibleRows.length === 0) {
             block.style.display = 'none'; // Catégorie vide, on la cache
         } else {
@@ -571,7 +597,7 @@ function filtrerCatalogue() {
 // ==========================================
 // 8. AUTO-SAUVEGARDE (Brouillon Anti-Perte)
 // ==========================================
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // On cible uniquement les pages d'inventaire et de vérification
     const form = document.querySelector('#form-inventaire, #form-verification');
     if (!form) return;
@@ -588,7 +614,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const savedData = localStorage.getItem(saveKey);
     if (savedData) {
         const data = JSON.parse(savedData);
-        
+
         // A. On restaure les textes et les nombres (champs classiques)
         for (const [name, value] of Object.entries(data.inputs || {})) {
             const input = form.querySelector(`[name="${name}"]`);
@@ -598,7 +624,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 input.dispatchEvent(new Event('input'));
             }
         }
-        
+
         // B. On restaure les cases à cocher spéciales (Radios / DSA)
         for (const [index, isChecked] of Object.entries(data.checkboxes || {})) {
             const checkboxes = form.querySelectorAll('input[type="checkbox"]');
@@ -618,12 +644,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function saveToLocal() {
         let data = { inputs: {}, checkboxes: {} };
-        
+
         // Sauvegarde de tous les champs qui ont un "name"
         form.querySelectorAll('input[name], select[name]').forEach(el => {
             data.inputs[el.name] = el.value;
         });
-        
+
         // Sauvegarde de l'état de TOUTES les cases à cocher par leur index
         form.querySelectorAll('input[type="checkbox"]').forEach((el, index) => {
             data.checkboxes[index] = el.checked;
@@ -636,7 +662,67 @@ document.addEventListener('DOMContentLoaded', function() {
     // ----------------------------------------------------
     // 3. NETTOYAGE (Quand on valide officiellement)
     // ----------------------------------------------------
-    form.addEventListener('submit', function() {
+    form.addEventListener('submit', function () {
         localStorage.removeItem(saveKey);
+    });
+});
+
+// ==========================================
+// 9. ACCORDÉONS AVEC ANIMATION FLUIDE (MOTEUR ROBUSTE)
+// ==========================================
+document.addEventListener('DOMContentLoaded', function () {
+    const headers = document.querySelectorAll('.category-header');
+
+    headers.forEach(header => {
+        header.addEventListener('click', function () {
+            // On cible STRICTEMENT l'élément qui suit le titre (tableau ou div)
+            let content = this.nextElementSibling;
+            if (!content) return; // Sécurité si rien ne suit le titre
+
+            // Ajoute la classe d'animation si elle n'y est pas
+            if (!content.classList.contains('accordion-anim')) {
+                content.classList.add('accordion-anim');
+            }
+
+            const icon = this.querySelector('.toggle-icon');
+            let isClosed = content.getAttribute('data-collapsed') === 'true';
+
+            if (isClosed) {
+                // ---> OUVERTURE <---
+                content.style.display = ''; // Retire le display:none éventuel
+                content.style.maxHeight = content.scrollHeight + "px";
+                content.style.opacity = "1";
+                content.style.marginTop = "";
+                content.style.marginBottom = "";
+
+                content.setAttribute('data-collapsed', 'false');
+                if (icon) icon.style.transform = 'rotate(0deg)';
+
+                // Après l'animation, on libère la hauteur pour que la liste puisse s'agrandir (ex: si on ajoute un objet)
+                setTimeout(() => {
+                    if (content.getAttribute('data-collapsed') === 'false') {
+                        content.style.maxHeight = "none";
+                        content.style.overflow = "visible";
+                    }
+                }, 300);
+
+            } else {
+                // ---> FERMETURE <---
+                content.style.overflow = "hidden";
+                content.style.maxHeight = content.scrollHeight + "px"; // On fixe la hauteur exacte actuelle
+
+                // Petite astuce technique pour forcer le navigateur à actualiser avant de réduire à 0
+                void content.offsetWidth;
+
+                // On écrase la hauteur, l'opacité et les marges pour ne laisser AUCUN espace
+                content.style.maxHeight = "0px";
+                content.style.opacity = "0";
+                content.style.marginTop = "0";
+                content.style.marginBottom = "0";
+
+                content.setAttribute('data-collapsed', 'true');
+                if (icon) icon.style.transform = 'rotate(-90deg)';
+            }
+        });
     });
 });

@@ -355,143 +355,149 @@ require_once 'includes/header.php';
                 style="box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
                 <?php $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($categorie) : ['bg' => '#2c3e50', 'text' => 'white']; ?>
                 <h4 class="category-header"
-                    style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                    <?php echo htmlspecialchars($categorie); ?>
+                    style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;">
+                    <span><?php echo htmlspecialchars($categorie); ?></span>
+                    <span class="toggle-icon" style="transition: transform 0.2s ease; font-size: 14px;">▼</span>
                 </h4>
-
-                <table class="table-manager">
-                    <thead>
-                        <tr>
-                            <th style="width: <?php echo $peut_editer ? '40%' : '60%'; ?>;">NOM DU MATÉRIEL</th>
-                            <th class="text-center" style="width: 25%;">PÉREMPTION</th>
-                            <th class="text-center" style="width: 15%;">QUANTITÉ</th>
-                            <?php if ($peut_editer): ?>
-                                <th class="text-center" style="width: 20%;">ACTIONS</th><?php endif; ?>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($articles as $article):
-                            $sid = $article['stock_id'];
-                            $mat_id = $article['materiel_id'];
-                            $raw_date = $article['date_peremption'];
-                            $affichage_date = $raw_date ? date('d/m/Y', strtotime($raw_date)) : '-';
-                            ?>
-                            <?php if ($peut_editer): ?>
-                                <form id="form-edit-<?php echo $sid; ?>" method="POST"
-                                    action="gestion_sac.php?lieu_id=<?php echo $lieu_id; ?>"
-                                    onsubmit="return validateEdit(<?php echo $sid; ?>, <?php echo $est_reserve ? 'true' : 'false'; ?>)">
-                                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                                    <input type="hidden" name="action" value="edit_stock">
-                                    <input type="hidden" name="stock_id" value="<?php echo $sid; ?>">
-                                </form>
-                            <?php endif; ?>
-
-                            <tr class="item-row" data-nom="<?php echo htmlspecialchars(strtolower($article['materiel_nom'])); ?>"
-                                data-peremp="<?php echo $raw_date; ?>" style="transition: background 0.2s;">
-
-                                <td class="font-bold text-dark">
-                                    <?php echo htmlspecialchars($article['materiel_nom']); ?>
-
-                                    <?php if (!empty($article['poche'])): ?>
-                                        <div class="view-mode-<?php echo $sid; ?> text-sm mt-5" style="color: #1976D2;">
-                                            🎒 <?php echo htmlspecialchars($article['poche']); ?>
-                                        </div>
-                                    <?php endif; ?>
-
-                                    <?php if (!empty($article['note'])): ?>
-                                        <div class="view-mode-<?php echo $sid; ?> text-sm mt-5" style="color: #e65100;">
-                                            📝 <?php echo htmlspecialchars($article['note']); ?>
-                                        </div>
-                                    <?php endif; ?>
-
-                                    <?php if ($peut_editer): ?>
-                                        <input class="edit-mode-<?php echo $sid; ?> input-field mt-5" type="text"
-                                            form="form-edit-<?php echo $sid; ?>" name="poche"
-                                            value="<?php echo htmlspecialchars($article['poche'] ?? ''); ?>"
-                                            placeholder="Rangé dans la poche..." list="liste-poches"
-                                            style="display:none; padding: 5px; width: 90%; font-size: 12px;">
-
-                                        <input class="edit-mode-<?php echo $sid; ?> input-field mt-5" type="text"
-                                            form="form-edit-<?php echo $sid; ?>" name="note"
-                                            value="<?php echo htmlspecialchars($article['note'] ?? ''); ?>"
-                                            placeholder="Note ou qté min..."
-                                            style="display:none; padding: 5px; width: 90%; font-size: 12px;">
-                                    <?php endif; ?>
-                                </td>
-
-                                <td class="text-center text-muted">
-                                    <span class="view-mode-<?php echo $sid; ?>"><?php echo $affichage_date; ?></span>
-                                    <?php if ($peut_editer): ?><input class="edit-mode-<?php echo $sid; ?> input-field" type="date"
-                                            form="form-edit-<?php echo $sid; ?>" name="date_peremption" value="<?php echo $raw_date; ?>"
-                                            style="display:none; padding: 5px; margin: 0 auto;"><?php endif; ?>
-                                </td>
-
-                                <td class="text-center text-xl">
-                                    <span class="view-mode-<?php echo $sid; ?> font-bold"><?php echo $article['quantite']; ?></span>
-                                    <?php if ($peut_editer): ?>
-                                        <input class="edit-mode-<?php echo $sid; ?> input-field input-edit-qty" type="number"
-                                            form="form-edit-<?php echo $sid; ?>" name="quantite"
-                                            value="<?php echo $article['quantite']; ?>" data-old="<?php echo $article['quantite']; ?>"
-                                            min="0"
-                                            oninput="checkEditDifference(this, <?php echo $sid; ?>, <?php echo $est_reserve ? 'true' : 'false'; ?>)"
-                                            style="display:none; width: 60px; padding: 5px; text-align: center; margin: 0 auto;">
-                                    <?php endif; ?>
-                                </td>
-
+                <div class="category-content">
+                    <table class="table-manager">
+                        <thead>
+                            <tr>
+                                <th style="width: <?php echo $peut_editer ? '40%' : '60%'; ?>;">NOM DU MATÉRIEL</th>
+                                <th class="text-center" style="width: 25%;">PÉREMPTION</th>
+                                <th class="text-center" style="width: 15%;">QUANTITÉ</th>
                                 <?php if ($peut_editer): ?>
-                                    <td class="text-center">
-                                        <div class="view-mode-<?php echo $sid; ?> flex-center" style="justify-content: center;">
-                                            <button type="button" onclick="toggleEdit(<?php echo $sid; ?>, true)" class="btn-icon"
-                                                title="Modifier">✏️</button>
-                                            <form method="POST" style="margin: 0;"
-                                                onsubmit="return confirm('Retirer définitivement cet objet ?');">
-                                                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                                                <input type="hidden" name="action" value="delete_stock">
-                                                <input type="hidden" name="stock_id" value="<?php echo $sid; ?>">
-                                                <button type="submit" class="btn-icon text-muted" title="Supprimer">🗑️</button>
-                                            </form>
-                                        </div>
-                                        <div class="edit-mode-<?php echo $sid; ?> flex-center"
-                                            style="display: none; justify-content: center;">
-                                            <button type="submit" form="form-edit-<?php echo $sid; ?>"
-                                                class="btn btn-success btn-sm">💾</button>
-                                            <button type="button" onclick="toggleEdit(<?php echo $sid; ?>, false)"
-                                                class="btn btn-danger btn-sm">❌</button>
-                                        </div>
-                                    </td>
-                                <?php endif; ?>
+                                    <th class="text-center" style="width: 20%;">ACTIONS</th><?php endif; ?>
                             </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($articles as $article):
+                                $sid = $article['stock_id'];
+                                $mat_id = $article['materiel_id'];
+                                $raw_date = $article['date_peremption'];
+                                $affichage_date = $raw_date ? date('d/m/Y', strtotime($raw_date)) : '-';
+                                ?>
+                                <?php if ($peut_editer): ?>
+                                    <form id="form-edit-<?php echo $sid; ?>" method="POST"
+                                        action="gestion_sac.php?lieu_id=<?php echo $lieu_id; ?>"
+                                        onsubmit="return validateEdit(<?php echo $sid; ?>, <?php echo $est_reserve ? 'true' : 'false'; ?>)">
+                                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                                        <input type="hidden" name="action" value="edit_stock">
+                                        <input type="hidden" name="stock_id" value="<?php echo $sid; ?>">
+                                    </form>
+                                <?php endif; ?>
 
-                            <?php if ($peut_editer && !$est_reserve): ?>
-                                <tr class="edit-refill-row" id="edit-refill-<?php echo $sid; ?>"
-                                    style="display: none; background-color: #fdfaf6; border-bottom: 2px solid #ddd;">
-                                    <td colspan="4" style="padding: 10px 10px 10px 40px; border-left: 4px solid #2c3e50;">
-                                        <div class="flex-center">
-                                            <label class="text-sm font-bold text-dark">L'ajout (+<span
-                                                    class="diff-display text-danger font-bold">0</span>) provient de :</label>
-                                            <select name="reserve_stock_id" form="form-edit-<?php echo $sid; ?>"
-                                                class="input-reserve-lot input-field mb-0" style="width: auto; padding: 5px;"
-                                                onchange="updateEditMaxQty(this, <?php echo $sid; ?>)">
-                                                <option value="">-- Sélectionner une réserve --</option>
-                                                <?php
-                                                $lots = $reserves_par_materiel[$mat_id] ?? [];
-                                                foreach ($lots as $res):
-                                                    $date_format = $res['date_peremption'] ? date('d/m/Y', strtotime($res['date_peremption'])) : 'Aucune';
-                                                    $label = htmlspecialchars($res['lieu_nom']) . " | Pér: " . $date_format . " | Dispo: " . $res['quantite'];
-                                                    ?>
-                                                    <option value="<?php echo $res['reserve_stock_id']; ?>"
-                                                        data-max="<?php echo $res['quantite']; ?>"><?php echo $label; ?></option>
-                                                <?php endforeach; ?>
-                                                <option value="manual">Correction manuelle (Hors base)</option>
-                                            </select>
-                                        </div>
+                                <tr class="item-row"
+                                    data-nom="<?php echo htmlspecialchars(strtolower($article['materiel_nom'])); ?>"
+                                    data-peremp="<?php echo $raw_date; ?>" style="transition: background 0.2s;">
+
+                                    <td class="font-bold text-dark">
+                                        <?php echo htmlspecialchars($article['materiel_nom']); ?>
+
+                                        <?php if (!empty($article['poche'])): ?>
+                                            <div class="view-mode-<?php echo $sid; ?> text-sm mt-5" style="color: #1976D2;">
+                                                🎒 <?php echo htmlspecialchars($article['poche']); ?>
+                                            </div>
+                                        <?php endif; ?>
+
+                                        <?php if (!empty($article['note'])): ?>
+                                            <div class="view-mode-<?php echo $sid; ?> text-sm mt-5" style="color: #e65100;">
+                                                📝 <?php echo htmlspecialchars($article['note']); ?>
+                                            </div>
+                                        <?php endif; ?>
+
+                                        <?php if ($peut_editer): ?>
+                                            <input class="edit-mode-<?php echo $sid; ?> input-field mt-5" type="text"
+                                                form="form-edit-<?php echo $sid; ?>" name="poche"
+                                                value="<?php echo htmlspecialchars($article['poche'] ?? ''); ?>"
+                                                placeholder="Rangé dans la poche..." list="liste-poches"
+                                                style="display:none; padding: 5px; width: 90%; font-size: 12px;">
+
+                                            <input class="edit-mode-<?php echo $sid; ?> input-field mt-5" type="text"
+                                                form="form-edit-<?php echo $sid; ?>" name="note"
+                                                value="<?php echo htmlspecialchars($article['note'] ?? ''); ?>"
+                                                placeholder="Note ou qté min..."
+                                                style="display:none; padding: 5px; width: 90%; font-size: 12px;">
+                                        <?php endif; ?>
                                     </td>
-                                </tr>
-                            <?php endif; ?>
 
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+                                    <td class="text-center text-muted">
+                                        <span class="view-mode-<?php echo $sid; ?>"><?php echo $affichage_date; ?></span>
+                                        <?php if ($peut_editer): ?><input class="edit-mode-<?php echo $sid; ?> input-field"
+                                                type="date" form="form-edit-<?php echo $sid; ?>" name="date_peremption"
+                                                value="<?php echo $raw_date; ?>"
+                                                style="display:none; padding: 5px; margin: 0 auto;"><?php endif; ?>
+                                    </td>
+
+                                    <td class="text-center text-xl">
+                                        <span
+                                            class="view-mode-<?php echo $sid; ?> font-bold"><?php echo $article['quantite']; ?></span>
+                                        <?php if ($peut_editer): ?>
+                                            <input class="edit-mode-<?php echo $sid; ?> input-field input-edit-qty" type="number"
+                                                form="form-edit-<?php echo $sid; ?>" name="quantite"
+                                                value="<?php echo $article['quantite']; ?>"
+                                                data-old="<?php echo $article['quantite']; ?>" min="0"
+                                                oninput="checkEditDifference(this, <?php echo $sid; ?>, <?php echo $est_reserve ? 'true' : 'false'; ?>)"
+                                                style="display:none; width: 60px; padding: 5px; text-align: center; margin: 0 auto;">
+                                        <?php endif; ?>
+                                    </td>
+
+                                    <?php if ($peut_editer): ?>
+                                        <td class="text-center">
+                                            <div class="view-mode-<?php echo $sid; ?> flex-center" style="justify-content: center;">
+                                                <button type="button" onclick="toggleEdit(<?php echo $sid; ?>, true)" class="btn-icon"
+                                                    title="Modifier">✏️</button>
+                                                <form method="POST" style="margin: 0;"
+                                                    onsubmit="return confirm('Retirer définitivement cet objet ?');">
+                                                    <input type="hidden" name="csrf_token"
+                                                        value="<?php echo $_SESSION['csrf_token']; ?>">
+                                                    <input type="hidden" name="action" value="delete_stock">
+                                                    <input type="hidden" name="stock_id" value="<?php echo $sid; ?>">
+                                                    <button type="submit" class="btn-icon text-muted" title="Supprimer">🗑️</button>
+                                                </form>
+                                            </div>
+                                            <div class="edit-mode-<?php echo $sid; ?> flex-center"
+                                                style="display: none; justify-content: center;">
+                                                <button type="submit" form="form-edit-<?php echo $sid; ?>"
+                                                    class="btn btn-success btn-sm">💾</button>
+                                                <button type="button" onclick="toggleEdit(<?php echo $sid; ?>, false)"
+                                                    class="btn btn-danger btn-sm">❌</button>
+                                            </div>
+                                        </td>
+                                    <?php endif; ?>
+                                </tr>
+
+                                <?php if ($peut_editer && !$est_reserve): ?>
+                                    <tr class="edit-refill-row" id="edit-refill-<?php echo $sid; ?>"
+                                        style="display: none; background-color: #fdfaf6; border-bottom: 2px solid #ddd;">
+                                        <td colspan="4" style="padding: 10px 10px 10px 40px; border-left: 4px solid #2c3e50;">
+                                            <div class="flex-center">
+                                                <label class="text-sm font-bold text-dark">L'ajout (+<span
+                                                        class="diff-display text-danger font-bold">0</span>) provient de :</label>
+                                                <select name="reserve_stock_id" form="form-edit-<?php echo $sid; ?>"
+                                                    class="input-reserve-lot input-field mb-0" style="width: auto; padding: 5px;"
+                                                    onchange="updateEditMaxQty(this, <?php echo $sid; ?>)">
+                                                    <option value="">-- Sélectionner une réserve --</option>
+                                                    <?php
+                                                    $lots = $reserves_par_materiel[$mat_id] ?? [];
+                                                    foreach ($lots as $res):
+                                                        $date_format = $res['date_peremption'] ? date('d/m/Y', strtotime($res['date_peremption'])) : 'Aucune';
+                                                        $label = htmlspecialchars($res['lieu_nom']) . " | Pér: " . $date_format . " | Dispo: " . $res['quantite'];
+                                                        ?>
+                                                        <option value="<?php echo $res['reserve_stock_id']; ?>"
+                                                            data-max="<?php echo $res['quantite']; ?>"><?php echo $label; ?></option>
+                                                    <?php endforeach; ?>
+                                                    <option value="manual">Correction manuelle (Hors base)</option>
+                                                </select>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endif; ?>
+
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         <?php endforeach; ?>
     <?php endif; ?>

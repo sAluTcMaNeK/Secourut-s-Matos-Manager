@@ -219,9 +219,12 @@ require_once 'includes/header.php';
                     $couleur = function_exists('getCouleurCategorie') ? getCouleurCategorie($cat_pure) : ['bg' => '#2c3e50', 'text' => 'white'];
                 }
                 ?>
-                <h3 class="category-header" style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>;">
-                    <?php echo htmlspecialchars($nom_groupe); ?>
+                <h3 class="category-header" style="background-color: <?php echo $couleur['bg']; ?>; color: <?php echo $couleur['text']; ?>; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;">
+                    <span><?php echo htmlspecialchars($nom_groupe); ?></span>
+                    <span class="toggle-icon" style="transition: transform 0.2s ease; font-size: 14px;">▼</span>
                 </h3>
+
+                <div class="category-content">
 
                 <table class="table-manager" style="width: 100%; border-collapse: collapse;">
                     <thead>
@@ -342,6 +345,7 @@ require_once 'includes/header.php';
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+                </div>
             </div>
         <?php endforeach; ?>
     <?php endif; ?>
